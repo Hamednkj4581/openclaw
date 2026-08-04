@@ -10,11 +10,15 @@ interface OutlookCredentials {
     refreshToken: string;
 }
 
-interface WaitForCodeOptions {
+interface WaitForVerificationOptions {
     receivedAfter: Date;
     timeoutMs?: number;
     pollIntervalMs?: number;
 }
+
+export type ChatGptVerification =
+    | { type: 'code'; value: string }
+    | { type: 'link'; value: string };
 
 async function getAccessToken(clientId: string, refreshToken: string): Promise<string> {
     const body = new URLSearchParams({
@@ -36,13 +40,33 @@ async function getAccessToken(clientId: string, refreshToken: string): Promise<s
     return data.access_token;
 }
 
-function extractVerificationCode(subject: string, content: string): string | undefined {
-    const combined = `${subject}\n${content}`;
-    const contextual = combined.match(/(?:ChatGPT|OpenAI|代码|code)[^\d]{0,80}(\d{6})/i);
-    return contextual?.[1] ?? combined.match(/\b(\d{6})\b/)?.[1];
+function decodeHtmlUrl(value: string): string {
+    return value.replace(/&amp;/g, '&').replace(/&#x3D;/gi, '=').replace(/&#61;/g, '=');
 }
 
-async function findCodeInMailbox(client: ImapFlow, mailbox: string, receivedAfter: Date): Promise<string | undefined> {
+function extractVerification(subject: string, text: string, html: string): ChatGptVerification | undefined {
+    const combined = `${subject}\n${text}\n${html}`;
+    const urls = [
+        ...Array.from(html.matchAll(/href=["']([^"']+)["']/gi), match => decodeHtmlUrl(match[1])),
+        ...Array.from(text.matchAll(/https?:\/\/[^\s<>"]+/gi), match => decodeHtmlUrl(match[0]))
+    ];
+    const verificationLink = urls.find(url =>
+        /(?:auth\.openai\.com|openai\.com|chatgpt\.com)/i.test(url)
+        && /(?:verify|verification|authorize|callback|token)/i.test(url)
+    );
+    if (verificationLink)
+        return { type: 'link', value: verificationLink };
+
+    const contextual = combined.match(/(?:ChatGPT|OpenAI|代码|code)[^\d]{0,80}(\d{6})/i);
+    const code = contextual?.[1] ?? combined.match(/\b(\d{6})\b/)?.[1];
+    return code ? { type: 'code', value: code } : undefined;
+}
+
+async function findVerificationInMailbox(
+    client: ImapFlow,
+    mailbox: string,
+    receivedAfter: Date
+): Promise<ChatGptVerification | undefined> {
     const lock = await client.getMailboxLock(mailbox);
     try {
         const ids = await client.search({ since: receivedAfter });
@@ -57,14 +81,16 @@ async function findCodeInMailbox(client: ImapFlow, mailbox: string, receivedAfte
             const subject = message.envelope?.subject ?? '';
             const parsed = await simpleParser(message.source);
             const sender = parsed.from?.text ?? '';
-            const relevant = /(?:openai|chatgpt)/i.test(`${subject} ${sender}`);
-            if (!relevant)
+            if (!/(?:openai|chatgpt)/i.test(`${subject} ${sender}`))
                 continue;
 
-            const content = `${parsed.text ?? ''}\n${parsed.html || ''}`;
-            const code = extractVerificationCode(subject, content);
-            if (code)
-                return code;
+            const verification = extractVerification(
+                subject,
+                parsed.text ?? '',
+                typeof parsed.html === 'string' ? parsed.html : ''
+            );
+            if (verification)
+                return verification;
         }
     }
     finally {
@@ -72,10 +98,10 @@ async function findCodeInMailbox(client: ImapFlow, mailbox: string, receivedAfte
     }
 }
 
-export async function waitForChatGptCode(
+export async function waitForChatGptVerification(
     credentials: OutlookCredentials,
-    options: WaitForCodeOptions
-): Promise<string> {
+    options: WaitForVerificationOptions
+): Promise<ChatGptVerification> {
     const timeoutMs = options.timeoutMs ?? 180_000;
     const pollIntervalMs = options.pollIntervalMs ?? 5_000;
     const accessToken = await getAccessToken(credentials.clientId, credentials.refreshToken);
@@ -98,9 +124,9 @@ export async function waitForChatGptCode(
 
         while (Date.now() < deadline) {
             for (const mailbox of mailboxNames) {
-                const code = await findCodeInMailbox(client, mailbox, options.receivedAfter);
-                if (code)
-                    return code;
+                const verification = await findVerificationInMailbox(client, mailbox, options.receivedAfter);
+                if (verification)
+                    return verification;
             }
 
             logger.info('尚未收到 ChatGPT 验证邮件，等待下一次轮询');

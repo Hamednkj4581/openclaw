@@ -7,7 +7,7 @@ import { authenticator } from 'otplib';
 import Utility from './Utility.js';
 import logger from './logger.js';
 import githubAnnotation from './annotations.js';
-import { waitForChatGptCode } from './outlookMail.js';
+import { waitForChatGptVerification } from './outlookMail.js';
 import { installTurnstileHook, solveCloudflareIfPresent, validateCapSolver } from './capsolver.js';
 
 const MAX_TIMEOUT = Math.pow(2, 31) - 1;
@@ -111,18 +111,28 @@ async function enableMfa(page: Page): Promise<string> {
         await page.type("//input[@name='email']", email, { timeout: 60_000 });
         await page.click("//button[normalize-space(.)='Continue' and not(.//*[contains(normalize-space(.), 'Google')])]");
         await solveCloudflareIfPresent(page);
-        await page.type("//input[@type='password' and not(@disabled)]", chatGptPassword, { timeout: 60_000 });
-        await page.click("//button[normalize-space(.)='Continue']");
 
         logger.info('等待 ChatGPT 验证邮件');
-        const code = await waitForChatGptCode(
+        const verification = await waitForChatGptVerification(
             { email, clientId, refreshToken },
             { receivedAfter: registrationStartedAt }
         );
-        logger.info('收到 ChatGPT 验证邮件');
+        logger.info('收到 ChatGPT 验证邮件，类型：%s', verification.type);
 
-        await page.type("//input[@name='code']", code);
-        await page.click("//button[contains(., 'Continue')]");
+        if (verification.type === 'link') {
+            await page.goto(verification.value);
+            await solveCloudflareIfPresent(page);
+        }
+        else {
+            await page.type("//input[@name='code']", verification.value, { timeout: 60_000 });
+            await page.click("//button[normalize-space(.)='Continue']");
+        }
+
+        const passwordInput = await page.$x("//input[@type='password' and not(@disabled)]", { timeout: 10_000 });
+        if (passwordInput) {
+            await page.type("//input[@type='password' and not(@disabled)]", chatGptPassword);
+            await page.click("//button[normalize-space(.)='Continue']");
+        }
         const fullName = email.split('@')[0].replace(/[^a-zA-Z]/g, '') || 'ChatGPT User';
         await page.type("//input[@placeholder='Full name']", fullName);
         await page.type('//div[contains(@id,"-birthday")]//div[@contenteditable="true" and @data-type="month"]', String(Math.floor(Math.random() * 12) + 1));

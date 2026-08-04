@@ -24,20 +24,28 @@ async function getAccessToken(clientId: string, refreshToken: string): Promise<s
     const body = new URLSearchParams({
         client_id: clientId,
         grant_type: 'refresh_token',
-        refresh_token: refreshToken,
-        scope: 'https://outlook.office.com/IMAP.AccessAsUser.All offline_access'
+        refresh_token: refreshToken
     });
 
-    const { data } = await axios.post(
-        'https://login.microsoftonline.com/common/oauth2/v2.0/token',
-        body,
-        { headers: { 'content-type': 'application/x-www-form-urlencoded' } }
-    );
+    try {
+        const { data } = await axios.post(
+            'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+            body,
+            { headers: { 'content-type': 'application/x-www-form-urlencoded' } }
+        );
 
-    if (!data.access_token)
-        throw new Error(`Microsoft OAuth token 获取失败: ${data.error ?? '响应中没有 access_token'}`);
-
-    return data.access_token;
+        if (!data.access_token)
+            throw new Error(`响应中没有 access_token: ${data.error ?? 'unknown_error'}`);
+        return data.access_token;
+    }
+    catch (error) {
+        if (axios.isAxiosError(error)) {
+            const code = error.response?.data?.error ?? error.code ?? 'request_failed';
+            const description = error.response?.data?.error_description ?? error.message;
+            throw new Error(`Microsoft OAuth token 获取失败: ${code} ${description}`);
+        }
+        throw error;
+    }
 }
 
 function decodeHtmlUrl(value: string): string {

@@ -15,6 +15,7 @@ import { installTurnstileHook, solveCloudflareIfPresent, validateCapSolver } fro
 const MAX_TIMEOUT = Math.pow(2, 31) - 1;
 const REQUIRED_ENV = ['EMAIL', 'EMAIL_PASSWORD', 'CLIENT_ID', 'REFRESH_TOKEN'] as const;
 const EVIDENCE_TIMEOUT_MS = 15_000;
+const VERIFICATION_EMAIL_TIMEOUT_MS = 30_000;
 type RegistrationState = 'password' | 'email-verification' | 'code' | 'profile' | 'authenticated' | 'unknown';
 
 function requiredEnv(name: typeof REQUIRED_ENV[number]): string {
@@ -192,7 +193,10 @@ async function enableMfa(page: Page): Promise<string> {
         }
         if (state === 'email-verification' || state === 'code') {
             logger.info('等待 ChatGPT 验证邮件');
-            const verification = await waitForChatGptVerification(credentials, { receivedAfter: registrationStartedAt });
+            const verification = await waitForChatGptVerification(credentials, {
+                receivedAfter: registrationStartedAt,
+                timeoutMs: VERIFICATION_EMAIL_TIMEOUT_MS
+            });
             logger.info('收到 ChatGPT 验证邮件，类型：%s', verification.type);
             if (verification.type === 'link') {
                 await page.goto(verification.value);

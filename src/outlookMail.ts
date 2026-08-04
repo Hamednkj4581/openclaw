@@ -20,6 +20,8 @@ export type ChatGptVerification =
     | { type: 'code'; value: string }
     | { type: 'link'; value: string };
 
+const DEFAULT_VERIFICATION_TIMEOUT_MS = 30_000;
+
 function maskEmail(email: string): string {
     const [name, domain = ''] = email.split('@');
     return `${name.slice(0, 2)}***@${domain}`;
@@ -194,7 +196,9 @@ async function findVerificationInMailbox(
 ): Promise<ChatGptVerification | undefined> {
     const lock = await client.getMailboxLock(mailbox);
     try {
-        const ids = await client.search({ since: receivedAfter });
+        // search() returns sequence numbers by default. Request UIDs explicitly
+        // because fetchOne() below also runs in UID mode.
+        const ids = await client.search({ since: receivedAfter }, { uid: true });
         if (!ids || !ids.length)
             return undefined;
 
@@ -227,7 +231,7 @@ export async function waitForChatGptVerification(
     credentials: OutlookCredentials,
     options: WaitForVerificationOptions
 ): Promise<ChatGptVerification> {
-    const timeoutMs = options.timeoutMs ?? 180_000;
+    const timeoutMs = options.timeoutMs ?? DEFAULT_VERIFICATION_TIMEOUT_MS;
     const pollIntervalMs = options.pollIntervalMs ?? 5_000;
     const accessToken = await getAccessToken(credentials);
     const client = createClient(credentials, accessToken);
@@ -248,8 +252,11 @@ export async function waitForChatGptVerification(
                     return verification;
             }
 
-            logger.info('尚未收到 ChatGPT 验证邮件，等待下一次轮询');
-            await Utility.waitForSeconds(pollIntervalMs / 1000);
+            const remainingMs = deadline - Date.now();
+            if (remainingMs <= 0)
+                break;
+            logger.info('尚未收到 ChatGPT 验证邮件，等待下一次轮询（剩余约 %d 秒）', Math.ceil(remainingMs / 1000));
+            await Utility.waitForSeconds(Math.min(pollIntervalMs, remainingMs) / 1000);
         }
 
         throw new Error(`等待 ChatGPT 验证邮件超时（${Math.round(timeoutMs / 1000)} 秒）`);

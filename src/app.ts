@@ -27,8 +27,12 @@ function generatePassword(): string {
 async function screenshotAllPages(browser: Browser) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const pages = await browser.pages();
-    for (let i = 0; i < pages.length; i++)
-        await pages[i].screenshot({ path: `./images/chrome-${timestamp}-${i + 1}.png` }).catch(logger.error);
+    for (let i = 0; i < pages.length; i++) {
+        await Promise.race([
+            pages[i].screenshot({ path: `./images/chrome-${timestamp}-${i + 1}.png` }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('截图超时')), 15_000))
+        ]).catch(logger.error);
+    }
 }
 
 async function enableMfa(page: Page): Promise<string> {
@@ -107,7 +111,7 @@ async function enableMfa(page: Page): Promise<string> {
         await page.type("//input[@name='email']", email, { timeout: 60_000 });
         await page.click("//button[normalize-space(.)='Continue' and not(.//*[contains(normalize-space(.), 'Google')])]");
         await solveCloudflareIfPresent(page);
-        await page.type("//input[@name='new-password']", chatGptPassword, { timeout: 60_000 });
+        await page.type("//input[@type='password' and not(@disabled)]", chatGptPassword, { timeout: 60_000 });
         await page.click("//button[normalize-space(.)='Continue']");
 
         logger.info('等待 ChatGPT 验证邮件');

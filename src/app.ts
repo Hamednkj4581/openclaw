@@ -226,7 +226,9 @@ async function enableMfa(page: Page): Promise<string> {
         if (state !== 'authenticated') throw new Error(`注册流程未进入已登录 ChatGPT 状态，当前状态：${state}，URL：${page.url().replace(/[?#].*$/, '')}`);
         await evidence(page, 'authenticated');
         const otpSecret = enableChatGptMfa ? await enableMfa(page) : undefined;
-        Utility.appendStepSummary(JSON.stringify(otpSecret ? [email, chatGptPassword, otpSecret, new Date().toString()] : [email, chatGptPassword, new Date().toString()]));
+        Utility.appendStepSummary(
+            [email, chatGptPassword, ...(otpSecret ? [otpSecret] : []), new Date().toString()].join('----')
+        );
         logger.info('ChatGPT 注册完成%s', otpSecret ? '，已开启 2FA' : '');
     } catch (error) {
         await fail(error);

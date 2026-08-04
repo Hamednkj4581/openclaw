@@ -125,23 +125,20 @@ jobs:
         with:
           pattern: step-summary-*
           path: summaries
-          merge-multiple: true
 
       - name: 合并结果
         shell: python
         run: |
-          import json
           import os
           from pathlib import Path
 
           results = []
-          for path in Path('summaries').glob('*'):
+          for path in sorted(Path('summaries').glob('step-summary-*/step-summary')):
               if path.is_file():
                   for line in path.read_text(encoding='utf-8').splitlines():
                       if line.strip():
-                          results.append(json.loads(line))
+                          results.append(line.strip())
 
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
-              summary.write('```json\n')
-              summary.write(json.dumps(results, ensure_ascii=False, indent=2))
-              summary.write('\n```\n')
+              if results:
+                  summary.write('\n'.join(results) + '\n')

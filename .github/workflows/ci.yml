@@ -91,11 +91,10 @@ jobs:
           timeout -k 30s 300s node dist/app.js
 
       - name: 保存账号结果
-        if: always() && env.GITHUB_STEP_SUMMARY != ''
+        if: always()
         run: |
           if [ -s "$GITHUB_STEP_SUMMARY" ]; then
             cp "$GITHUB_STEP_SUMMARY" step-summary
-            truncate -s 0 "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: 上传账号结果

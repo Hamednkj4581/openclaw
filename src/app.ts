@@ -89,9 +89,9 @@ async function detectState(page: Page): Promise<RegistrationState> {
     if (/chatgpt\.com\/(?:\?|$)|chatgpt\.com\/(?:c|g|share)\//i.test(url) && !/auth|login|signup|verify/i.test(url)
         && await first(page, ["//textarea", "//*[@contenteditable='true']", "//button[contains(@aria-label, 'profile') or contains(@data-testid, 'profile')]"])) return 'authenticated';
     if (await first(page, ["//input[@type='password' and not(@disabled)]"])) return 'password';
+    if (/\/about-you(?:[/?#]|$)/i.test(url) || await first(page, ["//input[@placeholder='Full name' or @name='name']", "//input[@name='age' or @name='birthday']", "//*[@data-type='month']"])) return 'profile';
     if (await first(page, ["//input[@name='code' or @autocomplete='one-time-code' or @inputmode='numeric']"])) return 'code';
     if (/email-verification/i.test(url) || await first(page, ["//*[contains(translate(normalize-space(.), 'VERIFY YOUR EMAILCHECK YOUR EMAIL', 'verify your emailcheck your email'), 'verify your email') or contains(translate(normalize-space(.), 'VERIFY YOUR EMAILCHECK YOUR EMAIL', 'verify your emailcheck your email'), 'check your email')]"])) return 'email-verification';
-    if (await first(page, ["//input[@placeholder='Full name' or @name='name']", "//*[@data-type='month']"])) return 'profile';
     return 'unknown';
 }
 
@@ -116,6 +116,8 @@ async function fillProfileIfPresent(page: Page, email: string): Promise<boolean>
     if (await detectState(page) !== 'profile') return false;
     const fullName = email.split('@')[0].replace(/[^a-zA-Z]/g, '') || 'ChatGPT User';
     if (await first(page, ["//input[@placeholder='Full name' or @name='name']"])) await page.type("//input[@placeholder='Full name' or @name='name']", fullName);
+    const ageInput = "//input[@name='age' and not(@disabled)]";
+    if (await first(page, [ageInput])) await page.type(ageInput, String(25 + Math.floor(Math.random() * 20)));
     const birthday = { month: String(Math.floor(Math.random() * 12) + 1), day: String(Math.floor(Math.random() * 28) + 1), year: String(1980 + Math.floor(Math.random() * 30)) };
     for (const [type, value] of Object.entries(birthday)) {
         const selector = `//*[@contenteditable='true' and @data-type='${type}'] | //input[@name='${type}']`;

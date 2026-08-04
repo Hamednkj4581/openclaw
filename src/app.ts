@@ -74,6 +74,15 @@ async function clickContinue(page: Page): Promise<void> {
     await button.click();
 }
 
+async function openSignup(page: Page): Promise<void> {
+    const button = await first(page, [
+        "//button[@data-mobile-auth-entry-action='signup' and not(@disabled)]",
+        "//button[contains(normalize-space(string(.)), 'Sign up for free') or normalize-space(string(.))='Sign up']"
+    ]);
+    if (!button) throw new Error('找不到可用的 ChatGPT 注册入口');
+    await button.click();
+}
+
 async function detectState(page: Page): Promise<RegistrationState> {
     const url = page.url();
     if (/chatgpt\.com\/(?:\?|$)|chatgpt\.com\/(?:c|g|share)\//i.test(url) && !/auth|login|signup|verify/i.test(url)
@@ -166,7 +175,7 @@ async function enableMfa(page: Page): Promise<string> {
         await evidence(page, 'chatgpt-opened');
         await solveCloudflareIfPresent(page);
         await evidence(page, 'initial-turnstile-checked');
-        await page.click("//button[contains(normalize-space(.), 'Sign up for free') or normalize-space(.)='Sign up']");
+        await openSignup(page);
         await evidence(page, 'signup-opened');
         await solveCloudflareIfPresent(page);
         await page.type("//input[@name='email' or @type='email']", email, { timeout: 60_000 });

@@ -114,7 +114,9 @@ function createClient(credentials: OutlookCredentials, accessToken: string): Ima
 function classifyImapError(credentials: OutlookCredentials, stage: string, error: any): Error {
     const message = String(error?.message ?? error);
     const response = `${error?.responseText ?? ''} ${message}`;
-    if (/AUTHENTICATIONFAILED|authentication failed|login failed/i.test(response))
+    const responseStatus = String(error?.responseStatus ?? '').toUpperCase();
+    if (/AUTHENTICATIONFAILED|authentication failed|login failed/i.test(response)
+        || (stage === 'imap_connect' && responseStatus === 'NO'))
         return preflightError(credentials, stage, 'imap_authentication_failed', error, false, '确认 token 包含 IMAP.AccessAsUser.All 权限且邮箱允许 IMAP');
     if (/permission|not permitted|denied|authorization/i.test(response))
         return preflightError(credentials, stage, 'imap_permission_denied', error, false, '为应用授予 IMAP.AccessAsUser.All 权限后重新授权');

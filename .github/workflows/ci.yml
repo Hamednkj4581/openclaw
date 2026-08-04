@@ -1,0 +1,146 @@
+name: ChatGPT register
+
+on:
+  workflow_dispatch:
+    inputs:
+      accounts:
+        description: '每行：邮箱----邮箱密码----client_id----refresh_token'
+        required: true
+        type: string
+      enable_mfa:
+        description: '注册后开启 ChatGPT 两步验证'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TZ: Asia/Shanghai
+
+jobs:
+  prepare-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      ids: ${{ steps.matrix.outputs.ids }}
+    steps:
+      - id: matrix
+        name: 校验账号并生成矩阵
+        shell: python
+        env:
+          ACCOUNTS: ${{ inputs.accounts }}
+        run: |
+          import json
+          import os
+          import re
+
+          lines = [line.strip() for line in os.environ['ACCOUNTS'].splitlines() if line.strip()]
+          if not lines:
+              raise SystemExit('accounts 输入不能为空')
+
+          for index, line in enumerate(lines, 1):
+              fields = re.split(r'-{4,}', line)
+              if len(fields) != 4 or any(not field.strip() for field in fields):
+                  raise SystemExit(f'第 {index} 个非空行格式错误，必须包含 4 个非空字段')
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write('ids=' + json.dumps(list(range(len(lines))), separators=(',', ':')) + '\n')
+
+  register:
+    needs: prepare-matrix
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      max-parallel: 20
+      fail-fast: false
+      matrix:
+        account_index: ${{ fromJson(needs.prepare-matrix.outputs.ids) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 读取并保护账号配置
+        id: account
+        shell: python
+        env:
+          ACCOUNTS: ${{ inputs.accounts }}
+          ACCOUNT_INDEX: ${{ matrix.account_index }}
+        run: |
+          import os
+          import re
+
+          lines = [line.strip() for line in os.environ['ACCOUNTS'].splitlines() if line.strip()]
+          fields = [field.strip() for field in re.split(r'-{4,}', lines[int(os.environ['ACCOUNT_INDEX'])])]
+          names = ['EMAIL', 'EMAIL_PASSWORD', 'CLIENT_ID', 'REFRESH_TOKEN']
+
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env_file:
+              for name, value in zip(names, fields):
+                  print(f'::add-mask::{value}')
+                  env_file.write(f'{name}<<__ACCOUNT_VALUE__\n{value}\n__ACCOUNT_VALUE__\n')
+
+      - name: 构建并运行 ChatGPT 注册
+        env:
+          ENABLE_CHATGPT_MFA: ${{ inputs.enable_mfa }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk
+          npm install
+          npm run build
+          timeout -k 30s 300s node dist/app.js
+
+      - name: 保存账号结果
+        if: always() && env.GITHUB_STEP_SUMMARY != ''
+        run: |
+          if [ -s "$GITHUB_STEP_SUMMARY" ]; then
+            cp "$GITHUB_STEP_SUMMARY" step-summary
+            truncate -s 0 "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: 上传账号结果
+        if: always() && hashFiles('step-summary') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: step-summary-${{ matrix.account_index }}
+          path: step-summary
+          retention-days: 7
+
+      - name: 上传失败截图
+        if: always() && hashFiles('images/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: images-${{ matrix.account_index }}
+          path: images/
+          retention-days: 7
+
+  collect-summary:
+    runs-on: ubuntu-latest
+    if: always()
+    needs: register
+    steps:
+      - name: 下载所有账号结果
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: step-summary-*
+          path: summaries
+          merge-multiple: true
+
+      - name: 合并结果
+        shell: python
+        run: |
+          import json
+          import os
+          from pathlib import Path
+
+          results = []
+          for path in Path('summaries').glob('*'):
+              if path.is_file():
+                  for line in path.read_text(encoding='utf-8').splitlines():
+                      if line.strip():
+                          results.append(json.loads(line))
+
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+              summary.write('```json\n')
+              summary.write(json.dumps(results, ensure_ascii=False, indent=2))
+              summary.write('\n```\n')

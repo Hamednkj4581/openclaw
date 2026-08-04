@@ -3,4 +3,5 @@
 yarn.lock
 package-lock.json
 /images/
+/evidence/
 .DS_Store

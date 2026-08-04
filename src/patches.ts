@@ -118,6 +118,8 @@ Frame.prototype.click = async function (
     options?: Readonly<ClickOptions>
 ): Promise<void> {
     const handle = await this.waitForSelector(selector, options);
+    if (!handle)
+        throw new Error(`无法点击元素，选择器未匹配: ${selector}`);
     return handle.click(options);
 };
 
@@ -128,7 +130,10 @@ Frame.prototype.type = async function (
     text: string,
     options?: Readonly<KeyboardTypeOptions>
 ): Promise<void> {
-    await (await this.waitForSelector(selector, options)).click({ count: 3 });
+    const handle = await this.waitForSelector(selector, options);
+    if (!handle)
+        throw new Error(`无法输入文本，选择器未匹配: ${selector}`);
+    await handle.click({ count: 3 });
     return originalType.call(this, selector.startsWith("xpath=") ? selector : `xpath=${selector}`, text, options);
 };
 

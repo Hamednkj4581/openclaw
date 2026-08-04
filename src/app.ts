@@ -105,10 +105,10 @@ async function enableMfa(page: Page): Promise<string> {
         await page.click("//button[contains(., 'Sign up for free')]");
         await solveCloudflareIfPresent(page);
         await page.type("//input[@name='email']", email, { timeout: 60_000 });
-        await page.click("//button[contains(., 'Continue')]");
+        await page.click("//button[normalize-space(.)='Continue' and not(.//*[contains(normalize-space(.), 'Google')])]");
         await solveCloudflareIfPresent(page);
         await page.type("//input[@name='new-password']", chatGptPassword, { timeout: 60_000 });
-        await page.click("//button[contains(., 'Continue')]");
+        await page.click("//button[normalize-space(.)='Continue']");
 
         logger.info('等待 ChatGPT 验证邮件');
         const code = await waitForChatGptCode(

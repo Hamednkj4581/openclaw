@@ -82,6 +82,7 @@ jobs:
       - name: 构建并运行 ChatGPT 注册
         env:
           ENABLE_CHATGPT_MFA: ${{ inputs.enable_mfa }}
+          CAPSOLVER_API_KEY: ${{ secrets.CAPSOLVER_API_KEY }}
         run: |
           sudo apt-get update
           sudo apt-get install -y fonts-noto-cjk

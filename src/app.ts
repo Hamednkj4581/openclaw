@@ -8,6 +8,7 @@ import Utility from './Utility.js';
 import logger from './logger.js';
 import githubAnnotation from './annotations.js';
 import { waitForChatGptCode } from './outlookMail.js';
+import { installTurnstileHook, solveCloudflareIfPresent, validateCapSolver } from './capsolver.js';
 
 const MAX_TIMEOUT = Math.pow(2, 31) - 1;
 const REQUIRED_ENV = ['EMAIL', 'EMAIL_PASSWORD', 'CLIENT_ID', 'REFRESH_TOKEN'] as const;
@@ -69,6 +70,7 @@ async function enableMfa(page: Page): Promise<string> {
         requiredEnv('EMAIL_PASSWORD');
         const clientId = requiredEnv('CLIENT_ID');
         const refreshToken = requiredEnv('REFRESH_TOKEN');
+        await validateCapSolver();
         const enableChatGptMfa = process.env.ENABLE_CHATGPT_MFA === '1' || process.env.ENABLE_CHATGPT_MFA === 'true';
         const chatGptPassword = generatePassword();
         const headless = os.platform() === 'linux';
@@ -96,13 +98,16 @@ async function enableMfa(page: Page): Promise<string> {
 
         logger.info(chrome.process()?.spawnfile, await chrome.version());
         const page = await chrome.newPage();
+        await installTurnstileHook(page);
         const registrationStartedAt = new Date(Date.now() - 30_000);
 
         await page.goto('https://chatgpt.com/');
         await page.click("//button[contains(., 'Sign up for free')]");
-        await page.type("//input[@name='email']", email);
+        await solveCloudflareIfPresent(page);
+        await page.type("//input[@name='email']", email, { timeout: 60_000 });
         await page.click("//button[contains(., 'Continue')]");
-        await page.type("//input[@name='new-password']", chatGptPassword);
+        await solveCloudflareIfPresent(page);
+        await page.type("//input[@name='new-password']", chatGptPassword, { timeout: 60_000 });
         await page.click("//button[contains(., 'Continue')]");
 
         logger.info('等待 ChatGPT 验证邮件');

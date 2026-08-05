@@ -171,8 +171,35 @@ function decodeHtmlUrl(value: string): string {
     return value.replace(/&amp;/g, '&').replace(/&#x3D;/gi, '=').replace(/&#61;/g, '=');
 }
 
-function extractVerification(subject: string, text: string, html: string): ChatGptVerification | undefined {
-    const combined = `${subject}\n${text}\n${html}`;
+function htmlToVisibleText(html: string): string {
+    return html
+        .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;|&#160;/gi, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/&quot;|&#34;/gi, '"')
+        .replace(/&#39;|&apos;/gi, "'")
+        .replace(/&#(\d+);/g, (_, value) => String.fromCodePoint(Number(value)))
+        .replace(/&#x([\da-f]+);/gi, (_, value) => String.fromCodePoint(Number.parseInt(value, 16)))
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function plausibleCode(code: string | undefined): code is string {
+    return Boolean(code && !/^(\d)\1{5}$/.test(code));
+}
+
+function findContextualCode(value: string): string | undefined {
+    const label = '(?:verification\\s+code|security\\s+code|one[- ]time\\s+(?:code|password)|验证码|驗證碼|ChatGPT|OpenAI|code)';
+    const afterLabel = value.match(new RegExp(`${label}[^\\d]{0,80}(\\d{6})`, 'i'))?.[1];
+    if (plausibleCode(afterLabel)) return afterLabel;
+    const beforeLabel = value.match(new RegExp(`(\\d{6})[^\\d]{0,80}${label}`, 'i'))?.[1];
+    return plausibleCode(beforeLabel) ? beforeLabel : undefined;
+}
+
+export function extractVerification(subject: string, text: string, html: string): ChatGptVerification | undefined {
     const urls = [
         ...Array.from(html.matchAll(/href=["']([^"']+)["']/gi), match => decodeHtmlUrl(match[1])),
         ...Array.from(text.matchAll(/https?:\/\/[^\s<>"]+/gi), match => decodeHtmlUrl(match[0]))
@@ -184,8 +211,9 @@ function extractVerification(subject: string, text: string, html: string): ChatG
     if (verificationLink)
         return { type: 'link', value: verificationLink };
 
-    const contextual = combined.match(/(?:ChatGPT|OpenAI|代码|code)[^\d]{0,80}(\d{6})/i);
-    const code = contextual?.[1] ?? combined.match(/\b(\d{6})\b/)?.[1];
+    const plainText = `${subject}\n${text}`;
+    const code = findContextualCode(`${plainText}\n${htmlToVisibleText(html)}`)
+        ?? Array.from(plainText.matchAll(/\b(\d{6})\b/g), match => match[1]).find(plausibleCode);
     return code ? { type: 'code', value: code } : undefined;
 }
 

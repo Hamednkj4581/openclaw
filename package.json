@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "build": "esbuild src/app.ts --bundle --platform=node --format=cjs --outfile=dist/app.js",
+    "test": "esbuild src/outlookMail.test.ts --bundle --platform=node --format=cjs --outfile=dist/outlookMail.test.cjs && node --test dist/outlookMail.test.cjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

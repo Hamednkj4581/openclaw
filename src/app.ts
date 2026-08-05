@@ -9,20 +9,13 @@ import { authenticator } from 'otplib';
 import Utility from './Utility.js';
 import logger from './logger.js';
 import githubAnnotation from './annotations.js';
-import { OutlookCredentials, preflightOutlook, waitForChatGptVerification } from './outlookMail.js';
+import { credentialsFromEnv, preflightMail, waitForMailVerification } from './mailProvider.js';
 import { installTurnstileHook, solveCloudflareIfPresent, validateCapSolver } from './capsolver.js';
 
 const MAX_TIMEOUT = Math.pow(2, 31) - 1;
-const REQUIRED_ENV = ['EMAIL', 'EMAIL_PASSWORD', 'CLIENT_ID', 'REFRESH_TOKEN'] as const;
 const EVIDENCE_TIMEOUT_MS = 15_000;
 const VERIFICATION_EMAIL_TIMEOUT_MS = 30_000;
 type RegistrationState = 'password' | 'email-verification' | 'code' | 'profile' | 'authenticated' | 'unknown';
-
-function requiredEnv(name: typeof REQUIRED_ENV[number]): string {
-    const value = process.env[name]?.trim();
-    if (!value) throw new Error(`缺少环境变量 ${name}`);
-    return value;
-}
 
 function generatePassword(): string {
     return `Gpt!${randomBytes(15).toString('base64url')}9a`;
@@ -161,11 +154,10 @@ async function enableMfa(page: Page): Promise<string> {
     process.once('unhandledRejection', error => void fail(error));
 
     try {
-        const email = requiredEnv('EMAIL');
-        requiredEnv('EMAIL_PASSWORD');
-        const credentials: OutlookCredentials = { email, clientId: requiredEnv('CLIENT_ID'), refreshToken: requiredEnv('REFRESH_TOKEN') };
+        const credentials = credentialsFromEnv();
+        const email = credentials.email;
         await validateCapSolver();
-        await preflightOutlook(credentials);
+        await preflightMail(credentials);
         const registrationStartedAt = new Date(Date.now() - 30_000);
         const enableChatGptMfa = ['1', 'true'].includes(process.env.ENABLE_CHATGPT_MFA ?? '');
         const chatGptPassword = generatePassword();
@@ -198,7 +190,7 @@ async function enableMfa(page: Page): Promise<string> {
         }
         if (state === 'email-verification' || state === 'code') {
             logger.info('等待 ChatGPT 验证邮件');
-            const verification = await waitForChatGptVerification(credentials, {
+            const verification = await waitForMailVerification(credentials, {
                 receivedAfter: registrationStartedAt,
                 timeoutMs: VERIFICATION_EMAIL_TIMEOUT_MS
             });

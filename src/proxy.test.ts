@@ -5,7 +5,7 @@ import { buildJapanStickyProxy } from './proxy.js';
 test('buildJapanStickyProxy creates JP sticky username with fresh session', () => {
     process.env.PROXY_USERNAME = 'testuser';
     process.env.PROXY_PASSWORD = 'testpass';
-    process.env.PROXY_HOST = 'global.711proxy.com';
+    process.env.PROXY_HOST = 'us.rotgb.711proxy.com';
     process.env.PROXY_PORT = '10000';
     process.env.PROXY_REGION = 'JP';
     process.env.PROXY_SESS_TIME = '30';
@@ -13,8 +13,8 @@ test('buildJapanStickyProxy creates JP sticky username with fresh session', () =
     const a = buildJapanStickyProxy();
     const b = buildJapanStickyProxy();
 
-    assert.equal(a.server, 'http://global.711proxy.com:10000');
-    assert.equal(a.host, 'global.711proxy.com');
+    assert.equal(a.server, 'http://us.rotgb.711proxy.com:10000');
+    assert.equal(a.host, 'us.rotgb.711proxy.com');
     assert.equal(a.password, 'testpass');
     assert.equal(a.region, 'JP');
     assert.equal(a.sessTime, 30);

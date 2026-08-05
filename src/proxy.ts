@@ -19,8 +19,8 @@ export function buildJapanStickyProxy(): ProxyConfig {
     const password = process.env.PROXY_PASSWORD?.trim();
     if (!baseUser || !password) throw new Error('缺少 PROXY_USERNAME / PROXY_PASSWORD');
 
-    // 文档默认入口为 global；region-JP 决定出口国家，与 gateway 主机无关
-    const host = (process.env.PROXY_HOST ?? 'global.711proxy.com').trim();
+    // rotgb = Residential GB；region-JP 决定出口国家，与 gateway 主机无关
+    const host = (process.env.PROXY_HOST ?? 'us.rotgb.711proxy.com').trim();
     const port = Number(process.env.PROXY_PORT ?? 10000);
     const region = (process.env.PROXY_REGION ?? 'JP').trim().toUpperCase();
     const sessTime = Math.min(180, Math.max(5, Number(process.env.PROXY_SESS_TIME ?? 30)));

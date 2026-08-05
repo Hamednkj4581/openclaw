@@ -82,6 +82,7 @@ async function clickContinue(page: Page): Promise<void> {
 }
 
 async function openSignup(page: Page): Promise<void> {
+    if (await first(page, ["//input[@name='email' or @type='email']"])) return;
     const button = await first(page, [
         "//button[@data-mobile-auth-entry-action='signup' and not(@disabled)]",
         "//button[contains(normalize-space(string(.)), 'Sign up for free') or normalize-space(string(.))='Sign up']"

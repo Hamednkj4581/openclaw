@@ -13,7 +13,7 @@ interface TurnstileParams {
     cdata?: string;
 }
 
-const TURNSTILE_HOOK = `
+export const TURNSTILE_HOOK = `
 (() => {
   if (window.__cfHookInstalled) return;
   window.__cfHookInstalled = true;
@@ -28,18 +28,28 @@ const TURNSTILE_HOOK = `
     });
     if (typeof params.callback === 'function') window.__cfTurnstileCallbacks.push(params.callback);
   };
-  let id = 0;
-  const fake = {
-    render(container, params) { record(container, params); return 'cf-solver-' + (++id); },
-    execute(container, params) { record(container, params); },
-    ready(callback) { if (typeof callback === 'function') callback(); },
-    reset() {}, remove() {}, isExpired() { return false; },
-    getResponse() { return window.__cfToken || ''; }
+  const wrap = value => {
+    if (!value || value.__cfCaptureWrapped) return value;
+    for (const method of ['render', 'execute']) {
+      if (typeof value[method] !== 'function') continue;
+      const original = value[method].bind(value);
+      value[method] = (container, params) => {
+        record(container, params);
+        return original(container, params);
+      };
+    }
+    try { Object.defineProperty(value, '__cfCaptureWrapped', { value: true }); } catch (_) {}
+    return value;
   };
+  let turnstile;
   try {
-    Object.defineProperty(window, 'turnstile', { configurable: true, get: () => fake, set() {} });
+    Object.defineProperty(window, 'turnstile', {
+      configurable: true,
+      get: () => turnstile,
+      set: value => { turnstile = wrap(value); }
+    });
   } catch (_) {
-    window.turnstile = fake;
+    if (window.turnstile) wrap(window.turnstile);
   }
 })();`;
 

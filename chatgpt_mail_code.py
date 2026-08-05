@@ -293,6 +293,7 @@ def get_chatgpt_verifications(email_user, access_token):
                             "code": code,
                             "mail_time": format_mail_time(date_header),
                             "date": parsed_date,
+                            "recipient": decode_mime_header(message.get("To")),
                             "preview_path": preview_path,
                         }
                     )
@@ -330,7 +331,11 @@ def main():
     for item in verifications:
         preview = item.get("preview_path")
         preview_text = f"  预览：{preview}" if preview else ""
-        print(f"验证码：{item['code']}  邮件时间：{item['mail_time']}{preview_text}")
+        recipient = item.get("recipient") or "未知收件人"
+        print(
+            f"验证码：{item['code']}  收件人：{recipient}  "
+            f"邮件时间：{item['mail_time']}{preview_text}"
+        )
 
 
 if __name__ == "__main__":

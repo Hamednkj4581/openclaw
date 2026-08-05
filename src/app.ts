@@ -251,7 +251,7 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
             logger.info('等待 ChatGPT 验证邮件');
             const verification = await waitForMailVerification(credentials, {
                 receivedAfter: registrationStartedAt,
-                timeoutMs: credentials.provider === 'icloud' ? 90_000 : VERIFICATION_EMAIL_TIMEOUT_MS
+                timeoutMs: credentials.provider === 'outlook' ? VERIFICATION_EMAIL_TIMEOUT_MS : 90_000
             });
             logger.info('收到 ChatGPT 验证邮件，类型：%s', verification.type);
             if (verification.type === 'link') {

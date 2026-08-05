@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       accounts:
-        description: '每行：Outlook 邮箱----邮箱密码----client_id----refresh_token，或 iCloud 邮箱----API_KEY'
+        description: '每行：Outlook 邮箱----邮箱密码----client_id----refresh_token，或 iCloud 邮箱----API_KEY/网页取件链接'
         required: true
         type: string
       enable_mfa:
@@ -43,7 +43,7 @@ jobs:
           for index, line in enumerate(lines, 1):
               fields = re.split(r'-{4,}', line)
               if len(fields) not in (2, 4) or any(not field.strip() for field in fields):
-                  raise SystemExit(f'第 {index} 个非空行格式错误，必须是 iCloud 2 字段或 Outlook 4 字段格式')
+                  raise SystemExit(f'第 {index} 个非空行格式错误，必须是 iCloud（API Key/网页取件链接）2 字段或 Outlook 4 字段格式')
 
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
               output.write('ids=' + json.dumps(list(range(len(lines))), separators=(',', ':')) + '\n')

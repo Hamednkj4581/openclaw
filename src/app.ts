@@ -98,8 +98,14 @@ async function openSignup(page: Page): Promise<void> {
 
 async function detectState(page: Page): Promise<RegistrationState> {
     const url = page.url();
+    // 注册弹层仍可能停在 chatgpt.com，且页面上有 textarea/contenteditable；有邮箱输入框时不算已登录。
     if (/chatgpt\.com\/(?:\?|$)|chatgpt\.com\/(?:c|g|share)\//i.test(url) && !/auth|login|signup|verify/i.test(url)
-        && await first(page, ["//textarea", "//*[@contenteditable='true']", "//button[contains(@aria-label, 'profile') or contains(@data-testid, 'profile')]"])) return 'authenticated';
+        && !await first(page, ["//input[@name='email' or @type='email']"])
+        && await first(page, [
+            "//textarea[@id='prompt-textarea' or contains(@placeholder, 'Ask') or contains(@placeholder, 'Message')]",
+            "//*[@contenteditable='true' and (@id='prompt-textarea' or contains(@data-testid, 'composer') or contains(@placeholder, 'Ask') or contains(@placeholder, 'Message'))]",
+            "//button[contains(@aria-label, 'profile') or contains(@data-testid, 'profile')]"
+        ])) return 'authenticated';
     if (await first(page, ["//input[@type='password' and not(@disabled)]"])) return 'password';
     if (/\/about-you(?:[/?#]|$)/i.test(url) || await first(page, ["//input[@placeholder='Full name' or @name='name']", "//input[@name='age' or @name='birthday']", "//*[@data-type='month']"])) return 'profile';
     if (/\/mfa-challenge(?:[/?#]|$)/i.test(url) || await first(page, MFA_CHALLENGE_SELECTORS)) return 'mfa-challenge';
@@ -146,18 +152,24 @@ async function fillProfileIfPresent(page: Page, email: string): Promise<boolean>
 }
 
 async function extractAccessToken(page: Page): Promise<string> {
-    const accessToken = await page.evaluate(async () => {
-        const response = await fetch('/api/auth/session', { credentials: 'include' });
-        if (!response.ok)
-            throw new Error(`session HTTP ${response.status}`);
-        const data = await response.json() as { accessToken?: unknown };
-        return typeof data.accessToken === 'string' ? data.accessToken : null;
-    }).catch((error: Error) => {
-        throw new Error(`提取 ChatGPT accessToken 失败：${error.message}`);
-    });
-    if (!accessToken)
+    return Utility.waitForFunction(async () => {
+        try {
+            const accessToken = await page.evaluate(async () => {
+                const response = await fetch('/api/auth/session', { credentials: 'include' });
+                if (!response.ok)
+                    throw new Error(`session HTTP ${response.status}`);
+                const data = await response.json() as { accessToken?: unknown };
+                return typeof data.accessToken === 'string' && data.accessToken ? data.accessToken : null;
+            });
+            return accessToken;
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (/session HTTP/i.test(message)) return null;
+            throw new Error(`提取 ChatGPT accessToken 失败：${message}`);
+        }
+    }, { pollInterval: 500, timeout: 30_000 }).catch(() => {
         throw new Error('已登录但 /api/auth/session 未返回 accessToken');
-    return accessToken;
+    });
 }
 
 async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Promise<void>): Promise<string> {

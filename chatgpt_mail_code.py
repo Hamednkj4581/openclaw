@@ -122,17 +122,52 @@ def get_message_text(message):
 
 
 def get_message_html(message):
-    """提取邮件 HTML；若无 HTML 则把纯文本包成可预览页面。"""
+    """提取邮件 HTML；若无 HTML 则把纯文本包成可预览片段。"""
     plain_parts, html_parts = get_message_parts(message)
     if html_parts:
         return "\n".join(html_parts)
     if not plain_parts:
         return None
     body = html.escape("\n".join(plain_parts))
+    return f"<pre>{body}</pre>"
+
+
+def build_preview_meta_html(message, mailbox):
+    """生成预览页顶部的发件/收件/来源等元信息。"""
+    fields = [
+        ("发件人", decode_mime_header(message.get("From"))),
+        ("收件人", decode_mime_header(message.get("To"))),
+        ("回复至", decode_mime_header(message.get("Reply-To"))),
+        ("主题", decode_mime_header(message.get("Subject"))),
+        ("时间", format_mail_time(message.get("Date"))),
+        ("邮箱位置", mailbox),
+    ]
+    rows = []
+    for label, value in fields:
+        if not value:
+            continue
+        rows.append(
+            f"<div><strong>{html.escape(label)}：</strong>"
+            f"{html.escape(value)}</div>"
+        )
+    return (
+        '<div style="margin:0 0 16px;padding:12px 16px;border-bottom:1px solid #ddd;'
+        'font:14px/1.6 sans-serif;background:#f7f7f7;color:#222;">'
+        f"{''.join(rows)}</div>"
+    )
+
+
+def build_mail_preview_html(body_html, message, mailbox):
+    """把元信息注入邮件 HTML，方便浏览器直接预览来源。"""
+    meta_html = build_preview_meta_html(message, mailbox)
+    match = re.search(r"(<body[^>]*>)", body_html, flags=re.IGNORECASE)
+    if match:
+        idx = match.end()
+        return body_html[:idx] + meta_html + body_html[idx:]
     return (
         "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
         "<title>mail preview</title></head>"
-        f"<body><pre>{body}</pre></body></html>"
+        f"<body>{meta_html}{body_html}</body></html>"
     )
 
 
@@ -247,7 +282,12 @@ def get_chatgpt_verifications(email_user, access_token):
                     preview_path = None
                     html_content = get_message_html(message)
                     if html_content:
-                        preview_path = save_mail_preview_html(date_header, html_content)
+                        preview_html = build_mail_preview_html(
+                            html_content, message, mailbox
+                        )
+                        preview_path = save_mail_preview_html(
+                            date_header, preview_html
+                        )
                     results.append(
                         {
                             "code": code,

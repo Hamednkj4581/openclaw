@@ -9,8 +9,8 @@ description: 基于 GitHub Actions 实测结果维护本仓库的 ChatGPT 注册
 
 - 仓库默认只使用 `main` 一个分支，所有修改直接在 `main` 上进行；不得自行创建 feature、fix 或其他分支。只有用户主动、明确要求增加其他分支时才可例外，并在任务完成后按用户要求保留或清理。
 - 修改仓库文件前，必须先检查当前分支最近一次 GitHub Actions 运行；若该运行对应当前分支的最新提交或该运行无任何错误，可直接作为基线，否则必须重新触发并等待运行完成。不得在缺少有效基线的情况下开始修改，因为需要从基线获取调试数据来辅助修改。
-- `测试数据.txt` 第一行是 GitHub PAT，第二行是outlook账号信息，账号格式为 `email----email_password----client_id----refresh_token`，第三行是iCloud账号信息，格式为 `email----API_KEY`。
-- PAT 仅用于触发和查询 Actions，账号信息仅作为 `accounts` 输入。不得输出、提交、写入 remote URL 或复制到其他文件；`测试数据.txt` 必须保持未跟踪。
+- `测试数据.txt` 第一行是 GitHub PAT，第二行是outlook账号信息，账号格式为 `email----email_password----client_id----refresh_token`，第三行是iCloud账号信息，格式为 `email----API_KEY`。账号信息仅作为 `accounts` 输入；`测试数据.txt` 必须保持未跟踪。
+- PAT 的读取、校验、警告与禁止删除等规则见 `maintain-github-pat` skill，本 skill 不重复定义。
 - 不覆盖或提交用户无关改动。截图、DOM、日志、下载产物和凭据不得提交。
 - 以 Actions 的实时日志、URL、标题、截图和脱敏 DOM 为准，不凭选择器报错猜测页面状态。
 

@@ -1,9 +1,11 @@
 import email
+import html
 import imaplib
 import re
 from email.header import decode_header, make_header
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import requests
@@ -14,6 +16,7 @@ IMAP_HOST = "outlook.live.com"
 MAILBOXES = ("INBOX", "Junk")
 MAX_EMAILS_PER_MAILBOX = 30
 SHANGHAI_TIMEZONE = ZoneInfo("Asia/Shanghai")
+MAIL_PREVIEW_DIR = Path("mail_previews")
 
 
 class _TextExtractor(HTMLParser):
@@ -97,7 +100,7 @@ def html_to_text(value):
     return parser.get_text()
 
 
-def get_message_text(message):
+def get_message_parts(message):
     plain_parts = []
     html_parts = []
 
@@ -108,9 +111,48 @@ def get_message_text(message):
         if content_type == "text/plain":
             plain_parts.append(decode_part(part))
         elif content_type == "text/html":
-            html_parts.append(html_to_text(decode_part(part)))
+            html_parts.append(decode_part(part))
 
-    return "\n".join(plain_parts + html_parts)
+    return plain_parts, html_parts
+
+
+def get_message_text(message):
+    plain_parts, html_parts = get_message_parts(message)
+    return "\n".join(plain_parts + [html_to_text(part) for part in html_parts])
+
+
+def get_message_html(message):
+    """提取邮件 HTML；若无 HTML 则把纯文本包成可预览页面。"""
+    plain_parts, html_parts = get_message_parts(message)
+    if html_parts:
+        return "\n".join(html_parts)
+    if not plain_parts:
+        return None
+    body = html.escape("\n".join(plain_parts))
+    return (
+        "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+        "<title>mail preview</title></head>"
+        f"<body><pre>{body}</pre></body></html>"
+    )
+
+
+def save_mail_preview_html(date_header, html_content):
+    """按邮件时间将 HTML 保存到 mail_previews，同秒冲突时追加序号。"""
+    MAIL_PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
+    mail_time = parse_mail_datetime(date_header)
+    if mail_time is None:
+        stem = "unknown_time"
+    else:
+        stem = mail_time.astimezone(SHANGHAI_TIMEZONE).strftime("%Y-%m-%d_%H-%M-%S")
+
+    path = MAIL_PREVIEW_DIR / f"{stem}.html"
+    suffix = 2
+    while path.exists():
+        path = MAIL_PREVIEW_DIR / f"{stem}_{suffix}.html"
+        suffix += 1
+
+    path.write_text(html_content, encoding="utf-8")
+    return path
 
 
 def extract_verification_code(subject, body):
@@ -202,11 +244,16 @@ def get_chatgpt_verifications(email_user, access_token):
                 if code:
                     date_header = message.get("Date")
                     parsed_date = parse_mail_datetime(date_header)
+                    preview_path = None
+                    html_content = get_message_html(message)
+                    if html_content:
+                        preview_path = save_mail_preview_html(date_header, html_content)
                     results.append(
                         {
                             "code": code,
                             "mail_time": format_mail_time(date_header),
                             "date": parsed_date,
+                            "preview_path": preview_path,
                         }
                     )
     finally:
@@ -241,7 +288,9 @@ def main():
         return
 
     for item in verifications:
-        print(f"验证码：{item['code']}  邮件时间：{item['mail_time']}")
+        preview = item.get("preview_path")
+        preview_text = f"  预览：{preview}" if preview else ""
+        print(f"验证码：{item['code']}  邮件时间：{item['mail_time']}{preview_text}")
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ import logger from './logger.js';
 import githubAnnotation from './annotations.js';
 import { credentialsFromEnv, preflightMail, waitForMailVerification } from './mailProvider.js';
 import { installTurnstileHook, solveCloudflareIfPresent, validateCapSolver } from './capsolver.js';
+import { SIGNUP_SELECTORS } from './selectors.js';
 
 const MAX_TIMEOUT = Math.pow(2, 31) - 1;
 const EVIDENCE_TIMEOUT_MS = 15_000;
@@ -83,12 +84,16 @@ async function clickContinue(page: Page): Promise<void> {
 
 async function openSignup(page: Page): Promise<void> {
     if (await first(page, ["//input[@name='email' or @type='email']"])) return;
-    const button = await first(page, [
-        "//button[@data-mobile-auth-entry-action='signup' and not(@disabled)]",
-        "//button[contains(normalize-space(string(.)), 'Sign up for free') or normalize-space(string(.))='Sign up']"
-    ]);
-    if (!button) throw new Error('找不到可用的 ChatGPT 注册入口');
+    const button = await Utility.waitForFunction(
+        () => first(page, SIGNUP_SELECTORS),
+        { pollInterval: 500, timeout: 30_000 }
+    ).catch(() => null);
+    if (!button) throw new Error('等待 ChatGPT 注册入口超时');
     await button.click();
+    await Utility.waitForFunction(
+        () => first(page, ["//input[@name='email' or @type='email']"]),
+        { pollInterval: 500, timeout: 30_000 }
+    );
 }
 
 async function detectState(page: Page): Promise<RegistrationState> {

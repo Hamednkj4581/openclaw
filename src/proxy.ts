@@ -1,6 +1,6 @@
 import { randomInt } from 'crypto';
 import axios from 'axios';
-import { HttpsProxyAgent } from 'https-proxy-agent';
+import logger from './logger.js';
 
 export type ProxyConfig = {
     host: string;
@@ -33,11 +33,21 @@ export function buildJapanStickyProxy(): ProxyConfig {
 
 /** 启动浏览器前预检：确认代理可达且出口国家匹配 */
 export async function preflightProxy(proxy: ProxyConfig): Promise<void> {
-    const agent = new HttpsProxyAgent(`http://${encodeURIComponent(proxy.username)}:${encodeURIComponent(proxy.password)}@${proxy.host}:${proxy.port}`);
-    const { data } = await axios.get<{ ip?: string; country?: string; countryCode?: string }>('https://ipinfo.io/json', {
-        httpAgent: agent, httpsAgent: agent, timeout: 30_000, proxy: false,
+    // 使用 request 而非 get：patches 会给 axios.get 注入 agent，可能绕过 proxy
+    const { data } = await axios.request<{ ip?: string; country?: string; countryCode?: string }>({
+        method: 'GET',
+        url: 'https://ipinfo.io/json',
+        timeout: 30_000,
+        proxy: {
+            protocol: 'http',
+            host: proxy.host,
+            port: proxy.port,
+            auth: { username: proxy.username, password: proxy.password },
+        },
     });
     const country = (data.country ?? data.countryCode ?? '').toUpperCase();
-    if (country && country !== proxy.region)
+    logger.info('711Proxy 出口：ip=%s country=%s', data.ip ?? 'unknown', country || 'unknown');
+    if (!country) throw new Error('711Proxy 预检未返回国家信息');
+    if (country !== proxy.region)
         throw new Error(`711Proxy 出口国家为 ${country}，期望 ${proxy.region}（ip=${data.ip ?? 'unknown'}）`);
 }

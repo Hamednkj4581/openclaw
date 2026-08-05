@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       accounts:
-        description: '每行：邮箱----邮箱密码----client_id----refresh_token'
+        description: '每行：Outlook 邮箱----邮箱密码----client_id----refresh_token，或 iCloud 邮箱----API_KEY'
         required: true
         type: string
       enable_mfa:
         description: '注册后开启 ChatGPT 两步验证'
         required: false
-        default: false
+        default: true
         type: boolean
 
 concurrency:
@@ -42,8 +42,8 @@ jobs:
 
           for index, line in enumerate(lines, 1):
               fields = re.split(r'-{4,}', line)
-              if len(fields) != 4 or any(not field.strip() for field in fields):
-                  raise SystemExit(f'第 {index} 个非空行格式错误，必须包含 4 个非空字段')
+              if len(fields) not in (2, 4) or any(not field.strip() for field in fields):
+                  raise SystemExit(f'第 {index} 个非空行格式错误，必须是 iCloud 2 字段或 Outlook 4 字段格式')
 
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
               output.write('ids=' + json.dumps(list(range(len(lines))), separators=(',', ':')) + '\n')
@@ -72,7 +72,7 @@ jobs:
 
           lines = [line.strip() for line in os.environ['ACCOUNTS'].splitlines() if line.strip()]
           fields = [field.strip() for field in re.split(r'-{4,}', lines[int(os.environ['ACCOUNT_INDEX'])])]
-          names = ['EMAIL', 'EMAIL_PASSWORD', 'CLIENT_ID', 'REFRESH_TOKEN']
+          names = ['EMAIL', 'ICLOUD_API_KEY'] if len(fields) == 2 else ['EMAIL', 'EMAIL_PASSWORD', 'CLIENT_ID', 'REFRESH_TOKEN']
 
           with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env_file:
               for name, value in zip(names, fields):

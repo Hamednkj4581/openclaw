@@ -10,7 +10,7 @@ export interface OutlookCredentials {
     refreshToken: string;
 }
 
-interface WaitForVerificationOptions {
+export interface WaitForVerificationOptions {
     receivedAfter: Date;
     timeoutMs?: number;
     pollIntervalMs?: number;

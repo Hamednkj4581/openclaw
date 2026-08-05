@@ -95,12 +95,15 @@ async function detectState(page: Page): Promise<RegistrationState> {
     return 'unknown';
 }
 
-async function waitForState(page: Page, expected: RegistrationState[], timeoutMs = 30_000): Promise<RegistrationState> {
+async function waitForState(page: Page, expected: RegistrationState[], timeoutMs = 60_000): Promise<RegistrationState> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
         const state = await detectState(page);
         if (expected.includes(state)) return state;
-        await Utility.waitForSeconds(0.5);
+        // Cloudflare's managed challenge can appear well after a form submit.
+        // Keep looking for it while waiting for the next registration state
+        // instead of only checking once immediately after the click.
+        await solveCloudflareIfPresent(page, 1);
     }
     return detectState(page);
 }

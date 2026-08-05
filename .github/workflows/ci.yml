@@ -10,7 +10,7 @@ on:
       enable_mfa:
         description: '注册后开启 ChatGPT 两步验证'
         required: false
-        default: false
+        default: true
         type: boolean
 
 concurrency:

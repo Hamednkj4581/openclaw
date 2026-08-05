@@ -16,15 +16,20 @@ const MAX_TIMEOUT = Math.pow(2, 31) - 1;
 const EVIDENCE_TIMEOUT_MS = 15_000;
 const VERIFICATION_EMAIL_TIMEOUT_MS = 30_000;
 type RegistrationState = 'password' | 'email-verification' | 'code' | 'profile' | 'authenticated' | 'unknown';
+const sensitiveValues = new Set<string>();
 
 function generatePassword(): string {
     return `Gpt!${randomBytes(15).toString('base64url')}9a`;
 }
 
 function redactHtml(html: string): string {
-    return html
+    let redacted = html
+        .replace(/(<input\b[^>]*\bvalue=["'])[^"']*(["'])/gi, '$1[REDACTED]$2')
         .replace(/(<input\b[^>]*\b(?:type=["']password["']|name=["'](?:code|otp|token|password)["'])[^>]*\bvalue=["'])[^"']*(["'])/gi, '$1[REDACTED]$2')
         .replace(/(authorization|refresh_token|access_token|otpSecret)(["'\s:=]+)[^"'\s<]+/gi, '$1$2[REDACTED]');
+    for (const value of sensitiveValues)
+        if (value) redacted = redacted.replaceAll(value, '[REDACTED]');
+    return redacted;
 }
 
 async function withEvidenceTimeout<T>(operation: Promise<T>, label: string): Promise<T> {
@@ -45,10 +50,18 @@ async function captureEvidence(page: Page, step: number, stage: string): Promise
     }
 }
 
-async function screenshotAllPages(browser: Browser) {
+async function captureErrorEvidence(browser: Browser) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    for (const [index, page] of (await browser.pages()).entries())
-        await withEvidenceTimeout(page.screenshot({ path: `./evidence/error-${timestamp}-${index + 1}.png` }), '错误截图').catch(logger.error);
+    fs.mkdirSync('./evidence', { recursive: true });
+    for (const [index, page] of (await browser.pages()).entries()) {
+        const prefix = `error-${timestamp}-${index + 1}`;
+        await withEvidenceTimeout(page.screenshot({ path: `./evidence/${prefix}.png`, fullPage: true }), '错误截图').catch(error => logger.warn('错误截图失败：%s', error.message));
+        await withEvidenceTimeout(page.content(), '错误 DOM 快照').then(html => fs.writeFileSync(`./evidence/${prefix}.html`, redactHtml(html))).catch(error => logger.warn('错误 DOM 快照失败：%s', error.message));
+        for (const [frameIndex, frame] of page.frames().entries()) {
+            if (frame === page.mainFrame() || frame.url() === 'about:blank') continue;
+            await withEvidenceTimeout(frame.content(), '错误 Frame DOM 快照').then(html => fs.writeFileSync(`./evidence/${prefix}-frame-${frameIndex}.html`, redactHtml(html))).catch(error => logger.warn('错误 Frame DOM 快照失败：%s', error.message));
+        }
+    }
 }
 
 async function first(page: Page, selectors: string[]): Promise<ElementHandle<Element> | null> {
@@ -123,16 +136,37 @@ async function fillProfileIfPresent(page: Page, email: string): Promise<boolean>
     return true;
 }
 
-async function enableMfa(page: Page): Promise<string> {
+async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Promise<void>): Promise<string> {
     await page.goto('https://chatgpt.com/#settings/Security');
-    await page.click("//button[@aria-label='Multi-factor authentication']");
-    await page.click("//span[contains(., 'Trouble scanning?')]");
-    const otpSecret = await page.textContent("//button[text()='Copy code']/preceding-sibling::div");
+    const authenticatorToggle = await Utility.waitForFunction(() => first(page, [
+        "//button[@aria-label='Multi-factor authentication']",
+        "//button[@role='switch' and contains(translate(@aria-label, 'AUTHENTICATOR', 'authenticator'), 'authenticator')]",
+        "//*[normalize-space(.)='Authenticator app']/ancestor::*[.//button[@role='switch']][1]//button[@role='switch']"
+    ]), { timeout: 30_000 });
+    await evidence(page, 'mfa-security-settings');
+    await authenticatorToggle.click();
+    const troubleScanning = await Utility.waitForFunction(() => first(page, [
+        "//*[self::button or self::span or self::a][contains(normalize-space(.), 'Trouble scanning?')]",
+        "//*[self::button or self::a][contains(normalize-space(.), 'setup key') or contains(normalize-space(.), 'Setup key')]"
+    ]), { timeout: 30_000 });
+    await troubleScanning.click();
+    const otpSecretElement = await Utility.waitForFunction(() => first(page, [
+        "//button[normalize-space(.)='Copy code']/preceding-sibling::*[1]",
+        "//*[contains(normalize-space(.), 'setup key')]/following::*[self::code or self::div][normalize-space(.)][1]"
+    ]), { timeout: 30_000 });
+    const otpSecret = (await otpSecretElement.evaluate(element => element.textContent) ?? '').replace(/\s+/g, '');
     if (!otpSecret) throw new Error('无法读取 ChatGPT OTP 密钥');
-    await page.type("//input[@name='code']", authenticator.generate(otpSecret));
+    sensitiveValues.add(otpSecret);
+    await evidence(page, 'mfa-secret-ready');
+    await page.type("//input[@name='code' or @autocomplete='one-time-code' or @inputmode='numeric']", authenticator.generate(otpSecret));
     await clickContinue(page);
-    await page.click("//input[@id='safelyRecorded']");
+    const safelyRecorded = await Utility.waitForFunction(() => first(page, [
+        "//input[@id='safelyRecorded' or @type='checkbox']",
+        "//button[@role='checkbox']"
+    ]), { timeout: 30_000 });
+    await safelyRecorded.click();
     await clickContinue(page);
+    await evidence(page, 'mfa-enabled');
     return otpSecret;
 }
 
@@ -146,7 +180,7 @@ async function enableMfa(page: Page): Promise<string> {
         exiting = true;
         const message = error instanceof Error ? error.stack ?? error.message : String(error);
         githubAnnotation('error', message);
-        if (chrome) await screenshotAllPages(chrome);
+        if (chrome) await captureErrorEvidence(chrome);
         await chrome?.close().catch(() => undefined);
         process.exitCode = 1;
     };
@@ -156,10 +190,11 @@ async function enableMfa(page: Page): Promise<string> {
     try {
         const credentials = credentialsFromEnv();
         const email = credentials.email;
+        Object.values(credentials).forEach(value => typeof value === 'string' && sensitiveValues.add(value));
         await validateCapSolver();
         await preflightMail(credentials);
         const registrationStartedAt = new Date(Date.now() - 30_000);
-        const enableChatGptMfa = ['1', 'true'].includes(process.env.ENABLE_CHATGPT_MFA ?? '');
+        const enableChatGptMfa = !['0', 'false'].includes((process.env.ENABLE_CHATGPT_MFA ?? 'true').toLowerCase());
         const chatGptPassword = generatePassword();
         chrome = await puppeteer.launch({
             headless: os.platform() === 'linux', defaultViewport: null, protocolTimeout: MAX_TIMEOUT, slowMo: 20,
@@ -220,7 +255,7 @@ async function enableMfa(page: Page): Promise<string> {
         }
         if (state !== 'authenticated') throw new Error(`注册流程未进入已登录 ChatGPT 状态，当前状态：${state}，URL：${page.url().replace(/[?#].*$/, '')}`);
         await evidence(page, 'authenticated');
-        const otpSecret = enableChatGptMfa ? await enableMfa(page) : undefined;
+        const otpSecret = enableChatGptMfa ? await enableMfa(page, evidence) : undefined;
         Utility.appendStepSummary(
             [email, chatGptPassword, ...(otpSecret ? [otpSecret] : []), new Date().toString()].join('----')
         );

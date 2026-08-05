@@ -7,6 +7,7 @@ description: 基于 GitHub Actions 实测结果维护本仓库的 ChatGPT 注册
 
 ## 必须遵守
 
+- 仓库默认只使用 `main` 一个分支，所有修改直接在 `main` 上进行；不得自行创建 feature、fix 或其他分支。只有用户主动、明确要求增加其他分支时才可例外，并在任务完成后按用户要求保留或清理。
 - 修改仓库文件前，必须先检查当前分支最近一次 GitHub Actions 运行；若该运行对应当前分支的最新提交或该运行无任何错误，可直接作为基线，否则必须重新触发并等待运行完成。不得在缺少有效基线的情况下开始修改，因为需要从基线获取调试数据来辅助修改。
 - `测试数据.txt` 第一行是 GitHub PAT，第二行是outlook账号信息，账号格式为 `email----email_password----client_id----refresh_token`，第三行是iCloud账号信息，格式为 `email----API_KEY`。
 - PAT 仅用于触发和查询 Actions，账号信息仅作为 `accounts` 输入。不得输出、提交、写入 remote URL 或复制到其他文件；`测试数据.txt` 必须保持未跟踪。
@@ -15,8 +16,8 @@ description: 基于 GitHub Actions 实测结果维护本仓库的 ChatGPT 注册
 
 ## 修改循环
 
-1. 检查 `git status`、当前分支、工作流和相关源码。
-2. 修改前从 `测试数据.txt` 读取 PAT 与账号，触发当前分支的 `ci.yml`，等待运行结束。
+1. 检查 `git status`，确认位于 `main`（用户主动明确要求其他分支时除外），并检查工作流和相关源码。
+2. 修改前从 `测试数据.txt` 读取 PAT 与账号，触发当前工作分支的 `ci.yml`，等待运行结束。
 3. 检查每个 `register (N)` job 的结论；不能只看工作流顶层结论，因为注册任务使用了 `continue-on-error`。
 4. 注册失败时下载该账号的失败日志和 `evidence-N`，结合最后几个阶段的 URL、标题、截图和 DOM 确定失败点。敏感数据只在进程内使用，产物下载到仓库外的临时目录。
 5. 先分类再处理：

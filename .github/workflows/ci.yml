@@ -98,11 +98,12 @@ jobs:
           fi
 
       - name: 上传账号结果
-        if: always() && hashFiles('step-summary') != ''
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: step-summary-${{ matrix.account_index }}
           path: step-summary
+          if-no-files-found: ignore
           retention-days: 7
 
       - name: 上传注册过程证据

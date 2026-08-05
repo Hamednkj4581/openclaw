@@ -32,6 +32,21 @@ export function buildJapanStickyProxy(): ProxyConfig {
     return { host, port, server: `http://${host}:${port}`, username, password, session, region, sessTime };
 }
 
+/**
+ * 生成 PAC：图片/字体/JS/CSS 等静态资源直连本机网络，其余（HTML/XHR 等）走日本代理。
+ * 注册只需出口 IP 像日本；静态资源不校验地理，直连可省住宅流量。
+ */
+export function buildProxyPacUrl(proxy: Pick<ProxyConfig, 'host' | 'port'>): string {
+    const pac = [
+        'function FindProxyForURL(url, host) {',
+        '  if (/\\.(png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf|otf|eot|css|js|map)(\\?|$)/i.test(url))',
+        '    return "DIRECT";',
+        `  return "PROXY ${proxy.host}:${proxy.port}";`,
+        '}',
+    ].join('\n');
+    return `data:application/x-ns-proxy-autoconfig,${encodeURIComponent(pac)}`;
+}
+
 /** 启动浏览器前预检：确认代理可达且出口国家匹配 */
 export async function preflightProxy(proxy: ProxyConfig): Promise<void> {
     // 使用 request 而非 get：patches 会给 axios.get 注入 agent，可能绕过 proxy

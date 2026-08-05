@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildJapanStickyProxy } from './proxy.js';
+import { buildJapanStickyProxy, buildProxyPacUrl } from './proxy.js';
 
 test('buildJapanStickyProxy creates JP sticky username with fresh session', () => {
     process.env.PROXY_USERNAME = 'testuser';
@@ -27,4 +27,13 @@ test('buildJapanStickyProxy requires credentials', () => {
     delete process.env.PROXY_USERNAME;
     delete process.env.PROXY_PASSWORD;
     assert.throws(() => buildJapanStickyProxy(), /PROXY_USERNAME/);
+});
+
+test('buildProxyPacUrl routes static assets direct and rest via proxy', () => {
+    const pacUrl = buildProxyPacUrl({ host: 'us.rotgb.711proxy.com', port: 10000 });
+    assert.match(pacUrl, /^data:application\/x-ns-proxy-autoconfig,/);
+    const pac = decodeURIComponent(pacUrl.slice(pacUrl.indexOf(',') + 1));
+    assert.match(pac, /DIRECT/);
+    assert.match(pac, /PROXY us\.rotgb\.711proxy\.com:10000/);
+    assert.match(pac, /png\|jpe\?g/);
 });

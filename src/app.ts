@@ -11,7 +11,7 @@ import logger from './logger.js';
 import githubAnnotation from './annotations.js';
 import { credentialsFromEnv, preflightMail, waitForMailVerification } from './mailProvider.js';
 import { installTurnstileHook, solveCloudflareIfPresent, validateCapSolver } from './capsolver.js';
-import { buildJapanStickyProxy, preflightProxy } from './proxy.js';
+import { buildJapanStickyProxy, buildProxyPacUrl, preflightProxy } from './proxy.js';
 import { MFA_CHALLENGE_SELECTORS, MFA_CODE_SELECTORS, MFA_ENABLED_SELECTORS, MFA_VERIFY_SELECTORS, SIGNUP_SELECTORS } from './selectors.js';
 
 const MAX_TIMEOUT = Math.pow(2, 31) - 1;
@@ -252,7 +252,7 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
         sensitiveValues.add(proxy.password);
         sensitiveValues.add(process.env.PROXY_USERNAME ?? '');
         await preflightProxy(proxy);
-        logger.info('711Proxy 预检通过：%s region=%s session=%s sessTime=%smin（本次任务独立 sticky）', proxy.server, proxy.region, proxy.session, proxy.sessTime);
+        logger.info('711Proxy 预检通过：%s region=%s session=%s sessTime=%smin（PAC：静态资源直连，其余走代理）', proxy.server, proxy.region, proxy.session, proxy.sessTime);
         const registrationStartedAt = new Date(Date.now() - 30_000);
         const enableChatGptMfa = ['1', 'true'].includes((process.env.ENABLE_CHATGPT_MFA ?? 'false').toLowerCase());
         const chatGptPassword = generatePassword();
@@ -260,7 +260,8 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
             headless: os.platform() === 'linux', defaultViewport: null, protocolTimeout: MAX_TIMEOUT, slowMo: 20,
             handleSIGINT: false, handleSIGTERM: false, handleSIGHUP: false,
             args: [
-                `--proxy-server=${proxy.host}:${proxy.port}`,
+                // PAC：静态资源直连，HTML/接口走日本代理（page.authenticate 仍作用于代理请求）
+                `--proxy-pac-url=${buildProxyPacUrl(proxy)}`,
                 '--lang=en-US', '--window-size=1920,1080', '--disable-blink-features=AutomationControlled',
                 '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
                 '--disable-accelerated-2d-canvas', '--no-zygote', '--disable-gpu'

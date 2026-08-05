@@ -83,19 +83,13 @@ jobs:
         env:
           ENABLE_CHATGPT_MFA: ${{ inputs.enable_mfa }}
           CAPSOLVER_API_KEY: ${{ secrets.CAPSOLVER_API_KEY }}
+          ACCOUNT_RESULT_PATH: step-summary
         run: |
           sudo apt-get update
           sudo apt-get install -y fonts-noto-cjk
           npm install
           npm run build
           timeout -k 30s 300s node dist/app.js
-
-      - name: 保存账号结果
-        if: always()
-        run: |
-          if [ -s "$GITHUB_STEP_SUMMARY" ]; then
-            cp "$GITHUB_STEP_SUMMARY" step-summary
-          fi
 
       - name: 上传账号结果
         if: always()
@@ -133,7 +127,7 @@ jobs:
           from pathlib import Path
 
           results = []
-          for path in sorted(Path('summaries').glob('step-summary-*/step-summary')):
+          for path in sorted(Path('summaries').rglob('step-summary')):
               if path.is_file():
                   for line in path.read_text(encoding='utf-8').splitlines():
                       if line.strip():

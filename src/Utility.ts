@@ -37,9 +37,10 @@ export default class Utility {
     }
 
     static appendStepSummary(data: string, logFunc: (_: string) => void = logger.info) {
-        const { GITHUB_STEP_SUMMARY } = process.env;
+        const { GITHUB_STEP_SUMMARY, ACCOUNT_RESULT_PATH } = process.env;
         data = typeof data == "string" ? data : JSON.stringify(data, null, 4);
         GITHUB_STEP_SUMMARY && fs.appendFileSync(GITHUB_STEP_SUMMARY, data + "\n");
+        ACCOUNT_RESULT_PATH && fs.appendFileSync(ACCOUNT_RESULT_PATH, data + "\n");
         logFunc(data);
     }
 

@@ -19,7 +19,7 @@ test('buildJapanStickyProxy creates JP sticky username with fresh session', () =
     assert.equal(a.region, 'JP');
     assert.equal(a.sessTime, 30);
     assert.match(a.session, /^\d{8}$/);
-    assert.match(a.username, /^testuser-region-JP-session-\d{8}-sessTime-30$/);
+    assert.match(a.username, /^testuser-zone-custom-region-JP-session-\d{8}-sessTime-30$/);
     assert.notEqual(a.session, b.session);
 });
 

@@ -26,7 +26,8 @@ export function buildJapanStickyProxy(): ProxyConfig {
     const sessTime = Math.min(180, Math.max(5, Number(process.env.PROXY_SESS_TIME ?? 30)));
     // 8 位数字 session：相同值复用同一 IP；新值分配新 IP 并重新计时
     const session = String(randomInt(10_000_000, 100_000_000));
-    const username = `${baseUser}-region-${region}-session-${session}-sessTime-${sessTime}`;
+    // 文档格式：username-zone-custom-region-XX-session-(id)-sessTime-N
+    const username = `${baseUser}-zone-custom-region-${region}-session-${session}-sessTime-${sessTime}`;
 
     return { host, port, server: `http://${host}:${port}`, username, password, session, region, sessTime };
 }

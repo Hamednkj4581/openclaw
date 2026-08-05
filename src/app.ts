@@ -27,7 +27,7 @@ function redactHtml(html: string): string {
     let redacted = html
         .replace(/(<input\b[^>]*\bvalue=["'])[^"']*(["'])/gi, '$1[REDACTED]$2')
         .replace(/(<input\b[^>]*\b(?:type=["']password["']|name=["'](?:code|otp|token|password)["'])[^>]*\bvalue=["'])[^"']*(["'])/gi, '$1[REDACTED]$2')
-        .replace(/(authorization|refresh_token|access_token|otpSecret)(["'\s:=]+)[^"'\s<]+/gi, '$1$2[REDACTED]');
+        .replace(/(authorization|refresh_token|access_token|accessToken|otpSecret)(["'\s:=]+)[^"'\s<]+/gi, '$1$2[REDACTED]');
     for (const value of sensitiveValues)
         if (value) redacted = redacted.replaceAll(value, '[REDACTED]');
     return redacted;
@@ -143,6 +143,21 @@ async function fillProfileIfPresent(page: Page, email: string): Promise<boolean>
     }
     await clickContinue(page);
     return true;
+}
+
+async function extractAccessToken(page: Page): Promise<string> {
+    const accessToken = await page.evaluate(async () => {
+        const response = await fetch('/api/auth/session', { credentials: 'include' });
+        if (!response.ok)
+            throw new Error(`session HTTP ${response.status}`);
+        const data = await response.json() as { accessToken?: unknown };
+        return typeof data.accessToken === 'string' ? data.accessToken : null;
+    }).catch((error: Error) => {
+        throw new Error(`提取 ChatGPT accessToken 失败：${error.message}`);
+    });
+    if (!accessToken)
+        throw new Error('已登录但 /api/auth/session 未返回 accessToken');
+    return accessToken;
 }
 
 async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Promise<void>): Promise<string> {
@@ -283,10 +298,13 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
         if (state !== 'authenticated') throw new Error(`注册流程未进入已登录 ChatGPT 状态，当前状态：${state}，URL：${page.url().replace(/[?#].*$/, '')}`);
         await evidence(page, 'authenticated');
         const otpSecret = enableChatGptMfa ? await enableMfa(page, evidence) : undefined;
+        const accessToken = await extractAccessToken(page);
+        sensitiveValues.add(accessToken);
+        await evidence(page, 'access-token-ready');
         Utility.appendStepSummary(
-            [email, chatGptPassword, ...(otpSecret ? [otpSecret] : []), new Date().toString()].join('----')
+            [email, chatGptPassword, ...(otpSecret ? [otpSecret] : []), accessToken, new Date().toString()].join('----')
         );
-        logger.info('ChatGPT 注册完成%s', otpSecret ? '，已开启 2FA' : '');
+        logger.info('ChatGPT 注册完成%s，已提取 accessToken', otpSecret ? '，已开启 2FA' : '');
     } catch (error) {
         await fail(error);
     } finally {

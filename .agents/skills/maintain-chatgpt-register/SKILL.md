@@ -41,7 +41,7 @@ description: 基于 GitHub Actions 实测结果维护本仓库的 ChatGPT 注册
 - 忽略账号输入空行；任何非空行格式错误时在矩阵启动前终止。使用四个或更多连续连字符拆分四个字段，并保留重复邮箱。
 - 矩阵只传账号索引，保持 `fail-fast: false`；四个账号字段写入环境前全部掩码。
 - `CAPSOLVER_API_KEY` 只能来自 GitHub Secret。每个账号独立上传结果和完整过程证据。
-- 每次注册生成新 ChatGPT 密码并写入结果；只有启用 MFA 时才写入 OTP 密钥。
+- 每次注册生成新 ChatGPT 密码，并在登录成功后从 `/api/auth/session` 提取 accessToken 写入结果；只有启用 MFA 时才写入 OTP 密钥。结果格式：`email----password----accessToken----时间`，启用 MFA 时为 `email----password----otpSecret----accessToken----时间`。
 
 ## 成功标准
 

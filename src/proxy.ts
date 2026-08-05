@@ -47,23 +47,53 @@ export function buildProxyPacUrl(proxy: Pick<ProxyConfig, 'host' | 'port'>): str
     return `data:application/x-ns-proxy-autoconfig,${encodeURIComponent(pac)}`;
 }
 
-/** 启动浏览器前预检：确认代理可达且出口国家匹配 */
+type GeoLookup = { ip?: string; country?: string; countryCode?: string; country_code?: string; query?: string };
+
+function geoFromPayload(data: GeoLookup): { ip: string; country: string } {
+    const country = (data.country ?? data.countryCode ?? data.country_code ?? '').toUpperCase();
+    const ip = data.ip ?? data.query ?? 'unknown';
+    return { ip, country };
+}
+
+/** 启动浏览器前预检：确认代理可达且出口国家匹配（多源 + 429 重试，避免 ipinfo 限流误杀） */
 export async function preflightProxy(proxy: ProxyConfig): Promise<void> {
-    // 使用 request 而非 get：patches 会给 axios.get 注入 agent，可能绕过 proxy
-    const { data } = await axios.request<{ ip?: string; country?: string; countryCode?: string }>({
-        method: 'GET',
-        url: 'https://ipinfo.io/json',
-        timeout: 30_000,
-        proxy: {
-            protocol: 'http',
-            host: proxy.host,
-            port: proxy.port,
-            auth: { username: proxy.username, password: proxy.password },
-        },
-    });
-    const country = (data.country ?? data.countryCode ?? '').toUpperCase();
-    logger.info('711Proxy 出口：ip=%s country=%s', data.ip ?? 'unknown', country || 'unknown');
-    if (!country) throw new Error('711Proxy 预检未返回国家信息');
-    if (country !== proxy.region)
-        throw new Error(`711Proxy 出口国家为 ${country}，期望 ${proxy.region}（ip=${data.ip ?? 'unknown'}）`);
+    const endpoints = [
+        'https://ipinfo.io/json',
+        'http://ip-api.com/json/?fields=status,country,countryCode,query',
+        'https://ipapi.co/json/',
+    ];
+    const axiosProxy = {
+        protocol: 'http' as const,
+        host: proxy.host,
+        port: proxy.port,
+        auth: { username: proxy.username, password: proxy.password },
+    };
+    let lastError: unknown;
+    for (const url of endpoints) {
+        for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+                // 使用 request 而非 get：patches 会给 axios.get 注入 agent，可能绕过 proxy
+                const { data } = await axios.request<GeoLookup>({ method: 'GET', url, timeout: 30_000, proxy: axiosProxy });
+                const { ip, country } = geoFromPayload(data);
+                logger.info('711Proxy 出口：ip=%s country=%s via=%s', ip, country || 'unknown', new URL(url).host);
+                if (!country) throw new Error('711Proxy 预检未返回国家信息');
+                if (country !== proxy.region)
+                    throw new Error(`711Proxy 出口国家为 ${country}，期望 ${proxy.region}（ip=${ip}）`);
+                return;
+            } catch (error) {
+                lastError = error;
+                // 已拿到明确国家但不匹配：代理本身问题，不再换源
+                if (error instanceof Error && /出口国家为/.test(error.message)) throw error;
+                const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+                if (status === 429 && attempt < 2) {
+                    await new Promise(r => setTimeout(r, 1500 * attempt));
+                    continue;
+                }
+                logger.warn('711Proxy 预检失败：%s attempt=%s %s', new URL(url).host, attempt,
+                    axios.isAxiosError(error) ? `${status ?? ''} ${error.message}` : String(error));
+                break;
+            }
+        }
+    }
+    throw lastError instanceof Error ? lastError : new Error(`711Proxy 预检失败：${String(lastError)}`);
 }

@@ -97,8 +97,35 @@ async function openSignup(page: Page): Promise<void> {
     );
 }
 
+/** 识别 chrome-error 导航失败，避免误判为 unknown / 被 Protocol error 掩盖。 */
+async function chromeNavigationFailure(page: Page): Promise<string | null> {
+    const url = page.url();
+    if (!/^chrome-error:\/\//i.test(url)) return null;
+    const html = await page.content().catch(() => '');
+    const matchedCode = html.match(/\bERR_[A-Z0-9_]+\b/)?.[0];
+    const fallbackCode = matchedCode ?? await page.evaluate(() => {
+        const raw = (globalThis as { loadTimeDataRaw?: { errorCode?: string } }).loadTimeDataRaw;
+        return raw?.errorCode ?? document.querySelector('.error-code')?.textContent?.trim() ?? '';
+    }).catch(() => '');
+    const code = fallbackCode || 'UNKNOWN';
+    const targetRaw = html.match(/The webpage at <strong>([^<]+)<\/strong>/i)?.[1]
+        ?? html.match(/https?:\/\/[^\s"'<>]+/i)?.[0]
+        ?? '';
+    const target = targetRaw.replace(/&amp;/g, '&').replace(/[?#].*$/, '');
+    if (/ERR_TUNNEL_CONNECTION_FAILED/i.test(code))
+        return `代理隧道连接失败（${code}）：无法打开 ${target || '目标站点'}，页面已落到 chrome-error。这通常是 711Proxy 不稳定，不是注册选择器或 Protocol error。`;
+    return `浏览器导航失败（${code}）：无法打开 ${target || '目标站点'}，页面已落到 chrome-error。请检查代理/网络。`;
+}
+
+async function assertNoChromeNavigationFailure(page: Page): Promise<void> {
+    const message = await chromeNavigationFailure(page);
+    if (message) throw new Error(message);
+}
+
 async function detectState(page: Page): Promise<RegistrationState> {
     const url = page.url();
+    // chrome-error 上继续查选择器会触发 Puppeteer world 错乱，先短路。
+    if (/^chrome-error:\/\//i.test(url)) return 'unknown';
     // 注册弹层仍可能停在 chatgpt.com，且页面上有 textarea/contenteditable；有邮箱输入框时不算已登录。
     if (/chatgpt\.com\/(?:\?|$)|chatgpt\.com\/(?:c|g|share)\//i.test(url) && !/auth|login|signup|verify/i.test(url)
         && !await first(page, ["//input[@name='email' or @type='email']"])
@@ -118,6 +145,7 @@ async function detectState(page: Page): Promise<RegistrationState> {
 async function waitForState(page: Page, expected: RegistrationState[], timeoutMs = 60_000): Promise<RegistrationState> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
+        await assertNoChromeNavigationFailure(page);
         const state = await detectState(page);
         if (state === 'mfa-challenge')
             throw new Error('检测到已有 OpenAI 账号的两步验证（2FA）挑战：该邮箱已注册并启用了验证器 MFA，需要原账号的动态验证码；请关闭原账号 2FA 后重试，或更换未注册过 OpenAI 的邮箱。');
@@ -127,6 +155,7 @@ async function waitForState(page: Page, expected: RegistrationState[], timeoutMs
         // instead of only checking once immediately after the click.
         await solveCloudflareIfPresent(page, 1);
     }
+    await assertNoChromeNavigationFailure(page);
     return detectState(page);
 }
 
@@ -320,7 +349,10 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
             state = await waitForState(page, ['authenticated'], 60_000);
             await evidence(page, `after-profile-${state}`);
         }
-        if (state !== 'authenticated') throw new Error(`注册流程未进入已登录 ChatGPT 状态，当前状态：${state}，URL：${page.url().replace(/[?#].*$/, '')}`);
+        if (state !== 'authenticated') {
+            await assertNoChromeNavigationFailure(page);
+            throw new Error(`注册流程未进入已登录 ChatGPT 状态，当前状态：${state}，URL：${page.url().replace(/[?#].*$/, '')}`);
+        }
         await evidence(page, 'authenticated');
         const otpSecret = enableChatGptMfa ? await enableMfa(page, evidence) : undefined;
         const accessToken = await extractAccessToken(page);

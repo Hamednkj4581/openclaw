@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildJapanStickyProxy, buildProxyPacUrl, decideProxyRegion, geoFromPayload, rotateStickySession } from './proxy.js';
+import { buildJapanStickyProxy, buildProxyPacUrl, decideProxyRegion, geoFromPayload, pacRouteForUrl, rotateStickySession } from './proxy.js';
 
 test('buildJapanStickyProxy creates JP sticky username with fresh session', () => {
     process.env.PROXY_USERNAME = 'testuser';
@@ -36,6 +36,8 @@ test('buildProxyPacUrl routes static assets direct and rest via proxy', () => {
     assert.match(pac, /DIRECT/);
     assert.match(pac, /PROXY us\.rotgb\.711proxy\.com:10000/);
     assert.match(pac, /png\|jpe\?g/);
+    assert.equal(pacRouteForUrl('https://x.com/a.png'), 'DIRECT');
+    assert.equal(pacRouteForUrl('https://x.com/api'), 'PROXY');
 });
 
 test('geoFromPayload prefers ISO country codes over full names', () => {

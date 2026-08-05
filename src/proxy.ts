@@ -21,6 +21,15 @@ const GEO_ENDPOINTS = [
 
 const MAX_SESSION_ATTEMPTS = 3;
 
+/** PAC 与抓取分析共用：静态资源扩展名直连，其余走代理 */
+export const STATIC_ASSET_PATTERN = String.raw`\.(png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf|otf|eot|css|js|map)(\?|$)`;
+export const STATIC_ASSET_URL_RE = new RegExp(STATIC_ASSET_PATTERN, 'i');
+
+/** 与 buildProxyPacUrl 规则一致，供 network 产物标注当前会走 DIRECT 还是 PROXY */
+export function pacRouteForUrl(url: string): 'DIRECT' | 'PROXY' {
+    return STATIC_ASSET_URL_RE.test(url) ? 'DIRECT' : 'PROXY';
+}
+
 /** 构建 711Proxy 日本住宅 Sticky 代理：每次调用生成新 session，IP 与计时均重新开始 */
 export function buildJapanStickyProxy(): ProxyConfig {
     const baseUser = process.env.PROXY_USERNAME?.trim();
@@ -53,7 +62,7 @@ export function rotateStickySession(proxy: ProxyConfig): void {
 export function buildProxyPacUrl(proxy: Pick<ProxyConfig, 'host' | 'port'>): string {
     const pac = [
         'function FindProxyForURL(url, host) {',
-        '  if (/\\.(png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf|otf|eot|css|js|map)(\\?|$)/i.test(url))',
+        `  if (/${STATIC_ASSET_PATTERN}/i.test(url))`,
         '    return "DIRECT";',
         `  return "PROXY ${proxy.host}:${proxy.port}";`,
         '}',

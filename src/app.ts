@@ -11,6 +11,7 @@ import logger from './logger.js';
 import githubAnnotation from './annotations.js';
 import { credentialsFromEnv, preflightMail, waitForMailVerification } from './mailProvider.js';
 import { installTurnstileHook, solveCloudflareIfPresent, validateCapSolver } from './capsolver.js';
+import { installNetworkCapture } from './networkCapture.js';
 import { buildJapanStickyProxy, buildProxyPacUrl, preflightProxy } from './proxy.js';
 import { MFA_CHALLENGE_SELECTORS, MFA_CODE_SELECTORS, MFA_ENABLED_SELECTORS, MFA_VERIFY_SELECTORS, SIGNUP_SELECTORS } from './selectors.js';
 
@@ -258,12 +259,20 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
     let chrome: Browser | undefined;
     let exiting = false;
     let evidenceStep = 0;
+    let networkCapture: ReturnType<typeof installNetworkCapture> | undefined;
+    const redactText = (text: string) => {
+        let out = text;
+        for (const value of sensitiveValues)
+            if (value) out = out.replaceAll(value, '[REDACTED]');
+        return out;
+    };
     const evidence = (page: Page, stage: string) => captureEvidence(page, ++evidenceStep, stage);
     const fail = async (error: unknown) => {
         if (exiting) return;
         exiting = true;
         const message = error instanceof Error ? error.stack ?? error.message : String(error);
         githubAnnotation('error', message);
+        networkCapture?.flush();
         if (chrome) await captureErrorEvidence(chrome);
         await chrome?.close().catch(() => undefined);
         process.exitCode = 1;
@@ -299,6 +308,8 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
         logger.info(chrome.process()?.spawnfile, await chrome.version());
         const page = await chrome.newPage();
         await page.authenticate({ username: proxy.username, password: proxy.password });
+        // 抓取全程 URL 写入 evidence，供分析哪些主机/资源不必走住宅代理
+        networkCapture = installNetworkCapture(page, redactText);
         await installTurnstileHook(page);
         await page.goto('https://chatgpt.com/');
         await evidence(page, 'chatgpt-opened');
@@ -365,6 +376,7 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
     } catch (error) {
         await fail(error);
     } finally {
+        networkCapture?.flush();
         if (!exiting) await chrome?.close().catch(() => undefined);
     }
 })();

@@ -86,6 +86,12 @@ jobs:
         env:
           ENABLE_CHATGPT_MFA: ${{ inputs.enable_mfa }}
           CAPSOLVER_API_KEY: ${{ secrets.CAPSOLVER_API_KEY }}
+          PROXY_USERNAME: ${{ secrets.PROXY_USERNAME }}
+          PROXY_PASSWORD: ${{ secrets.PROXY_PASSWORD }}
+          PROXY_HOST: as.711proxy.com
+          PROXY_PORT: '10000'
+          PROXY_REGION: JP
+          PROXY_SESS_TIME: '30'
           ACCOUNT_RESULT_PATH: step-summary
         run: |
           sudo apt-get update

@@ -7,3 +7,5 @@ package-lock.json
 /mail_previews/
 __pycache__/
 .DS_Store
+/forward_mailboxes.txt
+/测试数据.txt

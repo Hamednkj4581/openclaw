@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { extractVerification } from './outlookMail.js';
+import { collectRecipientText, extractVerification, messageMatchesRecipient } from './outlookMail.js';
 
 test('ignores repeated placeholder digits in HTML scripts', () => {
     const html = '<html><body><p>Welcome to ChatGPT</p><script>const code = 000000;</script></body></html>';
@@ -22,4 +22,17 @@ test('prefers an OpenAI verification link over numeric content', () => {
         type: 'link',
         value: 'https://auth.openai.com/verify-email?token=abc&code=381729'
     });
+});
+
+test('matches forwarded recipient across To and Delivered-To style fields', () => {
+    const text = collectRecipientText({
+        to: { text: 'TimmothyBegan9059@hotmail.com' },
+        headers: {
+            get(name: string) {
+                return name === 'x-original-to' ? 'alias@example.com' : undefined;
+            }
+        }
+    });
+    assert.equal(messageMatchesRecipient(text, 'alias@example.com'), true);
+    assert.equal(messageMatchesRecipient(text, 'other@example.com'), false);
 });

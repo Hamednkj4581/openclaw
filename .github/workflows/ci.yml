@@ -4,8 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       accounts:
-        description: '多个账号用英文分号 ; 分隔（也兼容换行）：Outlook 邮箱----密码----client_id----refresh_token，或 iCloud 邮箱----API_KEY/网页取件链接'
+        description: '多个账号用英文分号 ; 分隔（也兼容换行）：单邮箱 / Outlook 邮箱----密码----client_id----refresh_token / iCloud 邮箱----API_KEY或网页取件链接'
         required: true
+        type: string
+      forwarding_emails:
+        description: '转发邮箱列表（每行或分号分隔的邮箱）。单邮箱账号将登录该转发箱并按收件人过滤'
+        required: false
+        default: 'TimmothyBegan9059@hotmail.com'
         type: string
       enable_mfa:
         description: '注册后开启 ChatGPT 两步验证'
@@ -33,16 +38,23 @@ jobs:
         shell: python
         env:
           ACCOUNTS: ${{ inputs.accounts }}
+          FORWARDING_EMAILS: ${{ inputs.forwarding_emails }}
+          FORWARD_MAILBOXES: ${{ secrets.FORWARD_MAILBOXES }}
         run: |
           import json
           import os
           import sys
 
           sys.path.insert(0, '.github/scripts')
-          from account_input import parse_accounts
+          from account_input import parse_accounts, parse_email_list, resolve_forward_mailbox
 
           try:
               accounts = parse_accounts(os.environ['ACCOUNTS'])
+              if any(len(account) == 1 for account in accounts):
+                  forwarding = parse_email_list(os.environ.get('FORWARDING_EMAILS', ''))
+                  if not forwarding:
+                      raise ValueError('存在单邮箱账号时必须配置 forwarding_emails')
+                  resolve_forward_mailbox(forwarding, os.environ.get('FORWARD_MAILBOXES', ''))
           except ValueError as error:
               raise SystemExit(str(error)) from None
 
@@ -67,18 +79,39 @@ jobs:
         env:
           ACCOUNTS: ${{ inputs.accounts }}
           ACCOUNT_INDEX: ${{ matrix.account_index }}
+          FORWARDING_EMAILS: ${{ inputs.forwarding_emails }}
+          FORWARD_MAILBOXES: ${{ secrets.FORWARD_MAILBOXES }}
         run: |
           import os
           import sys
 
           sys.path.insert(0, '.github/scripts')
-          from account_input import parse_accounts
+          from account_input import parse_accounts, parse_email_list, resolve_forward_mailbox
 
           fields = parse_accounts(os.environ['ACCOUNTS'])[int(os.environ['ACCOUNT_INDEX'])]
-          names = ['EMAIL', 'ICLOUD_API_KEY'] if len(fields) == 2 else ['EMAIL', 'EMAIL_PASSWORD', 'CLIENT_ID', 'REFRESH_TOKEN']
+          values = {}
+          if len(fields) == 1:
+              forwarding = parse_email_list(os.environ.get('FORWARDING_EMAILS', ''))
+              mailbox = resolve_forward_mailbox(forwarding, os.environ.get('FORWARD_MAILBOXES', ''))
+              values = {
+                  'EMAIL': fields[0],
+                  'MAILBOX_EMAIL': mailbox[0],
+                  'EMAIL_PASSWORD': mailbox[1],
+                  'CLIENT_ID': mailbox[2],
+                  'REFRESH_TOKEN': mailbox[3],
+              }
+          elif len(fields) == 2:
+              values = {'EMAIL': fields[0], 'ICLOUD_API_KEY': fields[1]}
+          else:
+              values = {
+                  'EMAIL': fields[0],
+                  'EMAIL_PASSWORD': fields[1],
+                  'CLIENT_ID': fields[2],
+                  'REFRESH_TOKEN': fields[3],
+              }
 
           with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env_file:
-              for name, value in zip(names, fields):
+              for name, value in values.items():
                   print(f'::add-mask::{value}')
                   env_file.write(f'{name}<<__ACCOUNT_VALUE__\n{value}\n__ACCOUNT_VALUE__\n')
 

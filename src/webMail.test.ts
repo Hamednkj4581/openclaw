@@ -23,6 +23,21 @@ test('keeps existing iCloud API Key credentials compatible', () => {
     });
 });
 
+test('reads forwarded Outlook mailbox credentials from MAILBOX_EMAIL', () => {
+    delete process.env.ICLOUD_API_KEY;
+    process.env.EMAIL = 'alias@example.com';
+    process.env.MAILBOX_EMAIL = 'TimmothyBegan9059@hotmail.com';
+    process.env.CLIENT_ID = 'client-id';
+    process.env.REFRESH_TOKEN = 'refresh-token';
+    assert.deepEqual(credentialsFromEnv(), {
+        provider: 'outlook',
+        email: 'alias@example.com',
+        mailboxEmail: 'TimmothyBegan9059@hotmail.com',
+        clientId: 'client-id',
+        refreshToken: 'refresh-token'
+    });
+});
+
 test('extracts a ChatGPT verification code from a server-rendered mailbox page', () => {
     const html = `
         <!doctype html><html><body>

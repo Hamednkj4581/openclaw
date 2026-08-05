@@ -5,9 +5,12 @@ import Utility from './Utility.js';
 import logger from './logger.js';
 
 export interface OutlookCredentials {
+    /** ChatGPT 注册邮箱；未设置 mailboxEmail 时同时作为 IMAP 登录邮箱 */
     email: string;
     clientId: string;
     refreshToken: string;
+    /** 转发收件箱：用其登录 IMAP，并按 email 过滤收件人 */
+    mailboxEmail?: string;
 }
 
 export interface WaitForVerificationOptions {
@@ -27,9 +30,16 @@ function maskEmail(email: string): string {
     return `${name.slice(0, 2)}***@${domain}`;
 }
 
+function imapUser(credentials: OutlookCredentials): string {
+    return credentials.mailboxEmail ?? credentials.email;
+}
+
 function safeMessage(value: unknown, credentials: OutlookCredentials): string {
-    const message = String(value ?? 'unknown').replace(credentials.refreshToken, '[REDACTED]');
-    return message.replaceAll(credentials.email, maskEmail(credentials.email)).slice(0, 500);
+    let message = String(value ?? 'unknown').replace(credentials.refreshToken, '[REDACTED]');
+    message = message.replaceAll(credentials.email, maskEmail(credentials.email));
+    if (credentials.mailboxEmail)
+        message = message.replaceAll(credentials.mailboxEmail, maskEmail(credentials.mailboxEmail));
+    return message.slice(0, 500);
 }
 
 function preflightError(
@@ -42,6 +52,7 @@ function preflightError(
 ): Error {
     const details = {
         email: maskEmail(credentials.email),
+        mailboxEmail: credentials.mailboxEmail ? maskEmail(credentials.mailboxEmail) : undefined,
         stage,
         category,
         status: error?.response?.status ?? error?.responseStatus ?? error?.statusCode ?? error?.code ?? null,
@@ -108,9 +119,51 @@ function createClient(credentials: OutlookCredentials, accessToken: string): Ima
         host: 'outlook.live.com',
         port: 993,
         secure: true,
-        auth: { user: credentials.email, accessToken },
+        auth: { user: imapUser(credentials), accessToken },
         logger: false
     });
+}
+
+/** 汇总 To/Cc/Delivered-To 等收件相关头，供转发场景按注册邮箱过滤 */
+export function collectRecipientText(message: {
+    envelope?: { to?: Array<{ address?: string | null }> | null; cc?: Array<{ address?: string | null }> | null } | null;
+    to?: unknown;
+    cc?: unknown;
+    headers?: { get?(name: string): unknown };
+}): string {
+    const parts: string[] = [];
+    const pushAddresses = (value: unknown) => {
+        if (!value) return;
+        if (typeof value === 'string') {
+            parts.push(value);
+            return;
+        }
+        if (Array.isArray(value)) {
+            for (const item of value) pushAddresses(item);
+            return;
+        }
+        if (typeof value === 'object') {
+            const record = value as { text?: unknown; address?: unknown; value?: unknown };
+            if (typeof record.text === 'string') parts.push(record.text);
+            if (typeof record.address === 'string') parts.push(record.address);
+            if (record.value !== undefined) pushAddresses(record.value);
+        }
+    };
+
+    pushAddresses(message.to);
+    pushAddresses(message.cc);
+    pushAddresses(message.envelope?.to);
+    pushAddresses(message.envelope?.cc);
+    for (const header of ['delivered-to', 'x-original-to', 'x-forwarded-to', 'resent-to']) {
+        const value = message.headers?.get?.(header);
+        if (value == null) continue;
+        pushAddresses(value);
+    }
+    return parts.join(' ').toLowerCase();
+}
+
+export function messageMatchesRecipient(recipientText: string, recipientEmail: string): boolean {
+    return recipientText.includes(recipientEmail.trim().toLowerCase());
 }
 
 function classifyImapError(credentials: OutlookCredentials, stage: string, error: any): Error {
@@ -131,6 +184,8 @@ function classifyImapError(credentials: OutlookCredentials, stage: string, error
 export async function preflightOutlook(credentials: OutlookCredentials): Promise<void> {
     if (!/^\S+@\S+\.\S+$/.test(credentials.email) || !credentials.clientId.trim() || !credentials.refreshToken.trim())
         throw preflightError(credentials, 'input_validation', 'invalid_input', new Error('邮箱、client_id 或 refresh_token 格式无效'), false, '修正账号输入格式');
+    if (credentials.mailboxEmail && !/^\S+@\S+\.\S+$/.test(credentials.mailboxEmail))
+        throw preflightError(credentials, 'input_validation', 'invalid_mailbox_email', new Error('转发邮箱格式无效'), false, '修正 forwarding_emails / FORWARD_MAILBOXES');
 
     const accessToken = await getAccessToken(credentials);
     const client = createClient(credentials, accessToken);
@@ -164,7 +219,10 @@ export async function preflightOutlook(credentials: OutlookCredentials): Promise
     finally {
         await client.logout().catch(() => undefined);
     }
-    logger.info('Outlook OAuth2/IMAP 预检成功：%s', maskEmail(credentials.email));
+    if (credentials.mailboxEmail)
+        logger.info('Outlook OAuth2/IMAP 预检成功：转发箱 %s，按收件人过滤 %s', maskEmail(credentials.mailboxEmail), maskEmail(credentials.email));
+    else
+        logger.info('Outlook OAuth2/IMAP 预检成功：%s', maskEmail(credentials.email));
 }
 
 function decodeHtmlUrl(value: string): string {
@@ -220,7 +278,8 @@ export function extractVerification(subject: string, text: string, html: string)
 async function findVerificationInMailbox(
     client: ImapFlow,
     mailbox: string,
-    receivedAfter: Date
+    receivedAfter: Date,
+    recipientEmail?: string
 ): Promise<ChatGptVerification | undefined> {
     const lock = await client.getMailboxLock(mailbox);
     try {
@@ -240,6 +299,17 @@ async function findVerificationInMailbox(
             const sender = parsed.from?.text ?? '';
             if (!/(?:openai|chatgpt)/i.test(`${subject} ${sender}`))
                 continue;
+
+            if (recipientEmail) {
+                const recipientText = collectRecipientText({
+                    envelope: message.envelope,
+                    to: parsed.to,
+                    cc: parsed.cc,
+                    headers: parsed.headers
+                });
+                if (!messageMatchesRecipient(recipientText, recipientEmail))
+                    continue;
+            }
 
             const verification = extractVerification(
                 subject,
@@ -275,7 +345,12 @@ export async function waitForChatGptVerification(
 
         while (Date.now() < deadline) {
             for (const mailbox of mailboxNames) {
-                const verification = await findVerificationInMailbox(client, mailbox, options.receivedAfter);
+                const verification = await findVerificationInMailbox(
+                    client,
+                    mailbox,
+                    options.receivedAfter,
+                    credentials.mailboxEmail ? credentials.email : undefined
+                );
                 if (verification)
                     return verification;
             }

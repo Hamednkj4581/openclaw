@@ -20,11 +20,13 @@ export function credentialsFromEnv(): MailCredentials {
         return { provider: 'webmail', email, mailboxUrl: apiKey };
     if (apiKey)
         return { provider: 'icloud', email, apiKey };
+    const mailboxEmail = process.env.MAILBOX_EMAIL?.trim();
     return {
         provider: 'outlook',
         email,
         clientId: requiredEnv('CLIENT_ID'),
-        refreshToken: requiredEnv('REFRESH_TOKEN')
+        refreshToken: requiredEnv('REFRESH_TOKEN'),
+        ...(mailboxEmail ? { mailboxEmail } : {})
     };
 }
 

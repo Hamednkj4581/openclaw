@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       accounts:
-        description: '每行：Outlook 邮箱----邮箱密码----client_id----refresh_token，或 iCloud 邮箱----API_KEY/网页取件链接'
+        description: '多个账号用英文分号 ; 分隔（也兼容换行）：Outlook 邮箱----密码----client_id----refresh_token，或 iCloud 邮箱----API_KEY/网页取件链接'
         required: true
         type: string
       enable_mfa:
@@ -26,6 +26,8 @@ jobs:
     outputs:
       ids: ${{ steps.matrix.outputs.ids }}
     steps:
+      - uses: actions/checkout@v4
+
       - id: matrix
         name: 校验账号并生成矩阵
         shell: python
@@ -34,19 +36,18 @@ jobs:
         run: |
           import json
           import os
-          import re
+          import sys
 
-          lines = [line.strip() for line in os.environ['ACCOUNTS'].splitlines() if line.strip()]
-          if not lines:
-              raise SystemExit('accounts 输入不能为空')
+          sys.path.insert(0, '.github/scripts')
+          from account_input import parse_accounts
 
-          for index, line in enumerate(lines, 1):
-              fields = re.split(r'-{4,}', line)
-              if len(fields) not in (2, 4) or any(not field.strip() for field in fields):
-                  raise SystemExit(f'第 {index} 个非空行格式错误，必须是 iCloud（API Key/网页取件链接）2 字段或 Outlook 4 字段格式')
+          try:
+              accounts = parse_accounts(os.environ['ACCOUNTS'])
+          except ValueError as error:
+              raise SystemExit(str(error)) from None
 
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
-              output.write('ids=' + json.dumps(list(range(len(lines))), separators=(',', ':')) + '\n')
+              output.write('ids=' + json.dumps(list(range(len(accounts))), separators=(',', ':')) + '\n')
 
   register:
     needs: prepare-matrix
@@ -68,10 +69,12 @@ jobs:
           ACCOUNT_INDEX: ${{ matrix.account_index }}
         run: |
           import os
-          import re
+          import sys
 
-          lines = [line.strip() for line in os.environ['ACCOUNTS'].splitlines() if line.strip()]
-          fields = [field.strip() for field in re.split(r'-{4,}', lines[int(os.environ['ACCOUNT_INDEX'])])]
+          sys.path.insert(0, '.github/scripts')
+          from account_input import parse_accounts
+
+          fields = parse_accounts(os.environ['ACCOUNTS'])[int(os.environ['ACCOUNT_INDEX'])]
           names = ['EMAIL', 'ICLOUD_API_KEY'] if len(fields) == 2 else ['EMAIL', 'EMAIL_PASSWORD', 'CLIENT_ID', 'REFRESH_TOKEN']
 
           with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env_file:

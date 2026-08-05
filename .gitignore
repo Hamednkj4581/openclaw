@@ -4,4 +4,5 @@ yarn.lock
 package-lock.json
 /images/
 /evidence/
+__pycache__/
 .DS_Store

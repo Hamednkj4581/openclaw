@@ -88,7 +88,7 @@ jobs:
           CAPSOLVER_API_KEY: ${{ secrets.CAPSOLVER_API_KEY }}
           PROXY_USERNAME: ${{ secrets.PROXY_USERNAME }}
           PROXY_PASSWORD: ${{ secrets.PROXY_PASSWORD }}
-          PROXY_HOST: as.711proxy.com
+          PROXY_HOST: global.711proxy.com
           PROXY_PORT: '10000'
           PROXY_REGION: JP
           PROXY_SESS_TIME: '30'

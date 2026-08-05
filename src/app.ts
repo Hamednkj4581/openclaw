@@ -11,7 +11,7 @@ import logger from './logger.js';
 import githubAnnotation from './annotations.js';
 import { credentialsFromEnv, preflightMail, waitForMailVerification } from './mailProvider.js';
 import { installTurnstileHook, solveCloudflareIfPresent, validateCapSolver } from './capsolver.js';
-import { buildJapanStickyProxy } from './proxy.js';
+import { buildJapanStickyProxy, preflightProxy } from './proxy.js';
 import { MFA_CHALLENGE_SELECTORS, MFA_CODE_SELECTORS, MFA_ENABLED_SELECTORS, MFA_VERIFY_SELECTORS, SIGNUP_SELECTORS } from './selectors.js';
 
 const MAX_TIMEOUT = Math.pow(2, 31) - 1;
@@ -251,6 +251,8 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
         const proxy = buildJapanStickyProxy();
         sensitiveValues.add(proxy.password);
         sensitiveValues.add(process.env.PROXY_USERNAME ?? '');
+        await preflightProxy(proxy);
+        logger.info('711Proxy 预检通过：%s region=%s session=%s sessTime=%smin（本次任务独立 sticky）', proxy.server, proxy.region, proxy.session, proxy.sessTime);
         const registrationStartedAt = new Date(Date.now() - 30_000);
         const enableChatGptMfa = ['1', 'true'].includes((process.env.ENABLE_CHATGPT_MFA ?? 'false').toLowerCase());
         const chatGptPassword = generatePassword();
@@ -258,14 +260,13 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
             headless: os.platform() === 'linux', defaultViewport: null, protocolTimeout: MAX_TIMEOUT, slowMo: 20,
             handleSIGINT: false, handleSIGTERM: false, handleSIGHUP: false,
             args: [
-                `--proxy-server=${proxy.server}`,
+                `--proxy-server=${proxy.host}:${proxy.port}`,
                 '--lang=en-US', '--window-size=1920,1080', '--disable-blink-features=AutomationControlled',
                 '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
                 '--disable-accelerated-2d-canvas', '--no-zygote', '--disable-gpu'
             ]
         });
         logger.info(chrome.process()?.spawnfile, await chrome.version());
-        logger.info('711Proxy 已启用：%s region=%s session=%s sessTime=%smin（本次任务独立 sticky）', proxy.server, proxy.region, proxy.session, proxy.sessTime);
         const page = await chrome.newPage();
         await page.authenticate({ username: proxy.username, password: proxy.password });
         await installTurnstileHook(page);

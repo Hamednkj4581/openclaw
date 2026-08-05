@@ -1,6 +1,10 @@
 import { randomInt } from 'crypto';
+import axios from 'axios';
+import { HttpsProxyAgent } from 'https-proxy-agent';
 
 export type ProxyConfig = {
+    host: string;
+    port: number;
     server: string;
     username: string;
     password: string;
@@ -15,7 +19,8 @@ export function buildJapanStickyProxy(): ProxyConfig {
     const password = process.env.PROXY_PASSWORD?.trim();
     if (!baseUser || !password) throw new Error('缺少 PROXY_USERNAME / PROXY_PASSWORD');
 
-    const host = (process.env.PROXY_HOST ?? 'as.711proxy.com').trim();
+    // 文档默认入口为 global；region-JP 决定出口国家，与 gateway 主机无关
+    const host = (process.env.PROXY_HOST ?? 'global.711proxy.com').trim();
     const port = Number(process.env.PROXY_PORT ?? 10000);
     const region = (process.env.PROXY_REGION ?? 'JP').trim().toUpperCase();
     const sessTime = Math.min(180, Math.max(5, Number(process.env.PROXY_SESS_TIME ?? 30)));
@@ -23,5 +28,16 @@ export function buildJapanStickyProxy(): ProxyConfig {
     const session = String(randomInt(10_000_000, 100_000_000));
     const username = `${baseUser}-region-${region}-session-${session}-sessTime-${sessTime}`;
 
-    return { server: `http://${host}:${port}`, username, password, session, region, sessTime };
+    return { host, port, server: `http://${host}:${port}`, username, password, session, region, sessTime };
+}
+
+/** 启动浏览器前预检：确认代理可达且出口国家匹配 */
+export async function preflightProxy(proxy: ProxyConfig): Promise<void> {
+    const agent = new HttpsProxyAgent(`http://${encodeURIComponent(proxy.username)}:${encodeURIComponent(proxy.password)}@${proxy.host}:${proxy.port}`);
+    const { data } = await axios.get<{ ip?: string; country?: string; countryCode?: string }>('https://ipinfo.io/json', {
+        httpAgent: agent, httpsAgent: agent, timeout: 30_000, proxy: false,
+    });
+    const country = (data.country ?? data.countryCode ?? '').toUpperCase();
+    if (country && country !== proxy.region)
+        throw new Error(`711Proxy 出口国家为 ${country}，期望 ${proxy.region}（ip=${data.ip ?? 'unknown'}）`);
 }

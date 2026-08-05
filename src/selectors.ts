@@ -10,6 +10,12 @@ export const MFA_CODE_SELECTORS = [
     "//input[contains(translate(@placeholder, 'DIGIT', 'digit'), '6-digit code')]"
 ];
 
+export const MFA_CHALLENGE_SELECTORS = [
+    "//*[self::h1 or self::h2][contains(translate(normalize-space(.), 'AUTHENTICATOR', 'authenticator'), 'authenticator')]",
+    "//input[@name='code' or @autocomplete='one-time-code'][ancestor::*[.//*[contains(translate(normalize-space(.), 'AUTHENTICATOR', 'authenticator'), 'authenticator')]]]",
+    "//*[self::button or self::a][contains(translate(normalize-space(.), 'TRY ANOTHER METHOD', 'try another method'), 'try another method')]"
+];
+
 export const MFA_VERIFY_SELECTORS = [
     "//button[normalize-space(.)='Verify' and not(@disabled) and not(@data-visually-disabled)]",
     "//button[@type='submit' and not(@disabled) and not(@data-visually-disabled)]",

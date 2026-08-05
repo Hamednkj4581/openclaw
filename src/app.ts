@@ -11,12 +11,12 @@ import logger from './logger.js';
 import githubAnnotation from './annotations.js';
 import { credentialsFromEnv, preflightMail, waitForMailVerification } from './mailProvider.js';
 import { installTurnstileHook, solveCloudflareIfPresent, validateCapSolver } from './capsolver.js';
-import { MFA_CODE_SELECTORS, MFA_ENABLED_SELECTORS, MFA_VERIFY_SELECTORS, SIGNUP_SELECTORS } from './selectors.js';
+import { MFA_CHALLENGE_SELECTORS, MFA_CODE_SELECTORS, MFA_ENABLED_SELECTORS, MFA_VERIFY_SELECTORS, SIGNUP_SELECTORS } from './selectors.js';
 
 const MAX_TIMEOUT = Math.pow(2, 31) - 1;
 const EVIDENCE_TIMEOUT_MS = 15_000;
 const VERIFICATION_EMAIL_TIMEOUT_MS = 30_000;
-type RegistrationState = 'password' | 'email-verification' | 'code' | 'profile' | 'authenticated' | 'unknown';
+type RegistrationState = 'password' | 'email-verification' | 'code' | 'profile' | 'authenticated' | 'mfa-challenge' | 'unknown';
 const sensitiveValues = new Set<string>();
 
 function generatePassword(): string {
@@ -102,6 +102,7 @@ async function detectState(page: Page): Promise<RegistrationState> {
         && await first(page, ["//textarea", "//*[@contenteditable='true']", "//button[contains(@aria-label, 'profile') or contains(@data-testid, 'profile')]"])) return 'authenticated';
     if (await first(page, ["//input[@type='password' and not(@disabled)]"])) return 'password';
     if (/\/about-you(?:[/?#]|$)/i.test(url) || await first(page, ["//input[@placeholder='Full name' or @name='name']", "//input[@name='age' or @name='birthday']", "//*[@data-type='month']"])) return 'profile';
+    if (/\/mfa-challenge(?:[/?#]|$)/i.test(url) || await first(page, MFA_CHALLENGE_SELECTORS)) return 'mfa-challenge';
     if (await first(page, ["//input[@name='code' or @autocomplete='one-time-code' or @inputmode='numeric']"])) return 'code';
     if (/email-verification/i.test(url) || await first(page, ["//*[contains(translate(normalize-space(.), 'VERIFY YOUR EMAILCHECK YOUR EMAIL', 'verify your emailcheck your email'), 'verify your email') or contains(translate(normalize-space(.), 'VERIFY YOUR EMAILCHECK YOUR EMAIL', 'verify your emailcheck your email'), 'check your email')]"])) return 'email-verification';
     return 'unknown';
@@ -111,6 +112,8 @@ async function waitForState(page: Page, expected: RegistrationState[], timeoutMs
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
         const state = await detectState(page);
+        if (state === 'mfa-challenge')
+            throw new Error('检测到已有 OpenAI 账号的两步验证（2FA）挑战：该邮箱已注册并启用了验证器 MFA，需要原账号的动态验证码；请关闭原账号 2FA 后重试，或更换未注册过 OpenAI 的邮箱。');
         if (expected.includes(state)) return state;
         // Cloudflare's managed challenge can appear well after a form submit.
         // Keep looking for it while waiting for the next registration state
@@ -218,7 +221,7 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
         await validateCapSolver();
         await preflightMail(credentials);
         const registrationStartedAt = new Date(Date.now() - 30_000);
-        const enableChatGptMfa = !['0', 'false'].includes((process.env.ENABLE_CHATGPT_MFA ?? 'true').toLowerCase());
+        const enableChatGptMfa = ['1', 'true'].includes((process.env.ENABLE_CHATGPT_MFA ?? 'false').toLowerCase());
         const chatGptPassword = generatePassword();
         chrome = await puppeteer.launch({
             headless: os.platform() === 'linux', defaultViewport: null, protocolTimeout: MAX_TIMEOUT, slowMo: 20,

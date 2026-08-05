@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { MFA_CODE_SELECTORS, MFA_ENABLED_SELECTORS, MFA_VERIFY_SELECTORS, SIGNUP_SELECTORS } from './selectors.js';
+import { MFA_CHALLENGE_SELECTORS, MFA_CODE_SELECTORS, MFA_ENABLED_SELECTORS, MFA_VERIFY_SELECTORS, SIGNUP_SELECTORS } from './selectors.js';
 
 test('signup selectors support the current anonymous ChatGPT home page', () => {
     assert.ok(SIGNUP_SELECTORS.some(selector => selector.includes("data-mobile-auth-entry-action='signup'")));
@@ -13,4 +13,9 @@ test('MFA selectors support the current authenticator dialog', () => {
     assert.ok(MFA_VERIFY_SELECTORS.some(selector => selector.includes("normalize-space(.)='Verify'")));
     assert.ok(MFA_ENABLED_SELECTORS.some(selector => selector.includes("data-testid='mfa-authenticator-toggle'")));
     assert.ok(MFA_ENABLED_SELECTORS.every(selector => selector.includes("aria-checked='true'")));
+});
+
+test('existing-account MFA challenge selectors are distinct from email verification', () => {
+    assert.ok(MFA_CHALLENGE_SELECTORS.some(selector => selector.includes('AUTHENTICATOR')));
+    assert.ok(MFA_CHALLENGE_SELECTORS.some(selector => selector.includes('TRY ANOTHER METHOD')));
 });

@@ -1,8 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { SIGNUP_SELECTORS } from './selectors.js';
+import { MFA_CODE_SELECTORS, MFA_VERIFY_SELECTORS, SIGNUP_SELECTORS } from './selectors.js';
 
 test('signup selectors support the current anonymous ChatGPT home page', () => {
     assert.ok(SIGNUP_SELECTORS.some(selector => selector.includes("data-mobile-auth-entry-action='signup'")));
     assert.ok(SIGNUP_SELECTORS.some(selector => selector.includes('Sign up for free')));
+});
+
+test('MFA selectors support the current authenticator dialog', () => {
+    assert.ok(MFA_CODE_SELECTORS.some(selector => selector.includes("name='totp_otp'")));
+    assert.ok(MFA_CODE_SELECTORS.some(selector => selector.includes('6-digit code')));
+    assert.ok(MFA_VERIFY_SELECTORS.some(selector => selector.includes("normalize-space(.)='Verify'")));
 });

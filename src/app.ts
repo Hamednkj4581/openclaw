@@ -11,7 +11,7 @@ import logger from './logger.js';
 import githubAnnotation from './annotations.js';
 import { credentialsFromEnv, preflightMail, waitForMailVerification } from './mailProvider.js';
 import { installTurnstileHook, solveCloudflareIfPresent, validateCapSolver } from './capsolver.js';
-import { SIGNUP_SELECTORS } from './selectors.js';
+import { MFA_CODE_SELECTORS, MFA_VERIFY_SELECTORS, SIGNUP_SELECTORS } from './selectors.js';
 
 const MAX_TIMEOUT = Math.pow(2, 31) - 1;
 const EVIDENCE_TIMEOUT_MS = 15_000;
@@ -164,8 +164,16 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
     if (!otpSecret) throw new Error('无法读取 ChatGPT OTP 密钥');
     sensitiveValues.add(otpSecret);
     await evidence(page, 'mfa-secret-ready');
-    await page.type("//input[@name='code' or @autocomplete='one-time-code' or @inputmode='numeric']", authenticator.generate(otpSecret));
-    await clickContinue(page);
+    const codeInput = await Utility.waitForFunction(
+        () => first(page, MFA_CODE_SELECTORS),
+        { timeout: 30_000 }
+    );
+    await codeInput.type(authenticator.generate(otpSecret));
+    const verifyButton = await Utility.waitForFunction(
+        () => first(page, MFA_VERIFY_SELECTORS),
+        { timeout: 30_000 }
+    );
+    await verifyButton.click();
     const safelyRecorded = await Utility.waitForFunction(() => first(page, [
         "//input[@id='safelyRecorded' or @type='checkbox']",
         "//button[@role='checkbox']"

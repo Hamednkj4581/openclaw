@@ -15,3 +15,9 @@ export const MFA_VERIFY_SELECTORS = [
     "//button[@type='submit' and not(@disabled) and not(@data-visually-disabled)]",
     "//button[normalize-space(.)='Continue' and not(@disabled)]"
 ];
+
+export const MFA_ENABLED_SELECTORS = [
+    "//button[@data-testid='mfa-authenticator-toggle' and @role='switch' and @aria-checked='true']",
+    "//button[@role='switch' and @aria-checked='true' and contains(translate(@aria-label, 'AUTHENTICATOR', 'authenticator'), 'authenticator')]",
+    "//*[normalize-space(.)='Authenticator app']/ancestor::*[.//button[@role='switch']][1]//button[@role='switch' and @aria-checked='true']"
+];

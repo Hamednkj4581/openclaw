@@ -3,6 +3,10 @@ name: ChatGPT register
 on:
   workflow_dispatch:
     inputs:
+      commit_message:
+        description: '用于 run-name 的提交主题（非敏感）'
+        required: true
+        type: string
       accounts:
         description: '多个账号用英文分号 ; 分隔（也兼容换行）：单邮箱 / Outlook 邮箱----密码----client_id----refresh_token / iCloud 邮箱----API_KEY或网页取件链接'
         required: true
@@ -17,6 +21,9 @@ on:
         required: false
         default: false
         type: boolean
+
+# workflow_dispatch 无 head_commit，用显式输入作为运行名
+run-name: ${{ inputs.commit_message }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

@@ -1,7 +1,14 @@
 export const SIGNUP_SELECTORS = [
+    // 当前匿名首页顶栏按钮（证据 DOM：data-testid="signup-button"）
+    "//button[@data-testid='signup-button' and not(@disabled)]",
     "//button[@data-mobile-auth-entry-action='signup' and not(@disabled)]",
     "//button[contains(normalize-space(string(.)), 'Sign up for free') or normalize-space(string(.))='Sign up']",
     "//a[contains(@href, 'signup') and not(@aria-disabled='true')]"
+];
+
+/** 注册弹层邮箱框：出现即表示 Sign up 已打开 */
+export const SIGNUP_EMAIL_SELECTORS = [
+    "//input[@id='email' or @name='email' or @type='email']"
 ];
 
 export const MFA_CODE_SELECTORS = [

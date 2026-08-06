@@ -13,7 +13,7 @@ import { credentialsFromEnv, preflightMail, waitForMailVerification } from './ma
 import { installTurnstileHook, solveCloudflareIfPresent, validateCapSolver } from './capsolver.js';
 import { installNetworkCapture } from './networkCapture.js';
 import { buildJapanStickyProxy, buildProxyPacUrl, preflightProxy } from './proxy.js';
-import { MFA_CHALLENGE_SELECTORS, MFA_CODE_SELECTORS, MFA_ENABLED_SELECTORS, MFA_VERIFY_SELECTORS, SIGNUP_SELECTORS } from './selectors.js';
+import { MFA_CHALLENGE_SELECTORS, MFA_CODE_SELECTORS, MFA_ENABLED_SELECTORS, MFA_VERIFY_SELECTORS, SIGNUP_EMAIL_SELECTORS, SIGNUP_SELECTORS } from './selectors.js';
 
 const MAX_TIMEOUT = Math.pow(2, 31) - 1;
 const EVIDENCE_TIMEOUT_MS = 15_000;
@@ -84,18 +84,44 @@ async function clickContinue(page: Page): Promise<void> {
     await button.click();
 }
 
+/** 点击注册入口并等待邮箱弹层；首页慢加载/水合未完成时单次 click 可能无效，故重试。 */
 async function openSignup(page: Page): Promise<void> {
-    if (await first(page, ["//input[@name='email' or @type='email']"])) return;
-    const button = await Utility.waitForFunction(
-        () => first(page, SIGNUP_SELECTORS),
-        { pollInterval: 500, timeout: 30_000 }
-    ).catch(() => null);
-    if (!button) throw new Error('等待 ChatGPT 注册入口超时');
-    await button.click();
-    await Utility.waitForFunction(
-        () => first(page, ["//input[@name='email' or @type='email']"]),
-        { pollInterval: 500, timeout: 30_000 }
-    );
+    if (await first(page, SIGNUP_EMAIL_SELECTORS)) return;
+
+    const deadline = Date.now() + 60_000;
+    let lastError = '';
+    while (Date.now() < deadline) {
+        if (await first(page, SIGNUP_EMAIL_SELECTORS)) return;
+
+        const button = await first(page, SIGNUP_SELECTORS);
+        if (!button) {
+            lastError = '未找到 Sign up 按钮';
+            await Utility.waitForSeconds(0.5);
+            continue;
+        }
+
+        try {
+            await button.evaluate(el => el.scrollIntoView({ block: 'center', inline: 'center' }));
+            const box = await button.boundingBox();
+            // 优先坐标点击，避免 React 水合后 ElementHandle.click 偶发不触发
+            if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+            else await button.click();
+        } catch (error) {
+            lastError = error instanceof Error ? error.message : String(error);
+            await Utility.waitForSeconds(0.5);
+            continue;
+        }
+
+        const opened = await Utility.waitForFunction(
+            () => first(page, SIGNUP_EMAIL_SELECTORS),
+            { pollInterval: 400, timeout: 8_000 }
+        ).catch(() => null);
+        if (opened) return;
+        lastError = '已点击 Sign up，但邮箱输入框未出现';
+    }
+
+    const title = await page.title().catch(() => '');
+    throw new Error(`打开 ChatGPT 注册入口超时（${lastError || '未知'}），URL：${page.url().replace(/[?#].*$/, '')}，标题：${title}`);
 }
 
 /** 识别 chrome-error 导航失败，避免误判为 unknown / 被 Protocol error 掩盖。 */
@@ -129,7 +155,7 @@ async function detectState(page: Page): Promise<RegistrationState> {
     if (/^chrome-error:\/\//i.test(url)) return 'unknown';
     // 注册弹层仍可能停在 chatgpt.com，且页面上有 textarea/contenteditable；有邮箱输入框时不算已登录。
     if (/chatgpt\.com\/(?:\?|$)|chatgpt\.com\/(?:c|g|share)\//i.test(url) && !/auth|login|signup|verify/i.test(url)
-        && !await first(page, ["//input[@name='email' or @type='email']"])
+        && !await first(page, SIGNUP_EMAIL_SELECTORS)
         && await first(page, [
             "//textarea[@id='prompt-textarea' or contains(@placeholder, 'Ask') or contains(@placeholder, 'Message')]",
             "//*[@contenteditable='true' and (@id='prompt-textarea' or contains(@data-testid, 'composer') or contains(@placeholder, 'Ask') or contains(@placeholder, 'Message'))]",
@@ -318,7 +344,7 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
         await openSignup(page);
         await evidence(page, 'signup-opened');
         await solveCloudflareIfPresent(page);
-        await page.type("//input[@name='email' or @type='email']", email, { timeout: 60_000 });
+        await page.type(SIGNUP_EMAIL_SELECTORS[0], email, { timeout: 60_000 });
         await evidence(page, 'email-entered');
         await clickContinue(page);
         await solveCloudflareIfPresent(page);

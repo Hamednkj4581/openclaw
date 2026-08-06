@@ -19,7 +19,7 @@ on:
       enable_mfa:
         description: '注册后开启 ChatGPT 两步验证'
         required: false
-        default: false
+        default: true
         type: boolean
 
 # workflow_dispatch 无 head_commit，用显式输入作为运行名

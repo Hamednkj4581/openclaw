@@ -170,36 +170,49 @@ async function openSignup(page: Page): Promise<void> {
     throw new Error(`打开 ChatGPT 注册入口超时（${lastError || '未知'}），URL：${page.url().replace(/[?#].*$/, '')}，标题：${title}`);
 }
 
-/** 首页 Sign up 点击无响应时，用 NextAuth csrf+signin 直达注册授权页 */
+/** 首页 Sign up 点击无响应时，用 NextAuth 或 /auth/login 直达注册页 */
 async function startSignupViaAuthApi(page: Page): Promise<void> {
-    logger.info('Sign up 点击未打开邮箱框，改走 /api/auth/signin/openai 直达注册');
-    const authUrl = await page.evaluate(async () => {
-        const csrfRes = await fetch('/api/auth/csrf', { credentials: 'include' });
-        if (!csrfRes.ok) throw new Error(`csrf HTTP ${csrfRes.status}`);
-        const csrfJson = await csrfRes.json() as { csrfToken?: unknown };
-        const csrfToken = typeof csrfJson.csrfToken === 'string' ? csrfJson.csrfToken : '';
-        if (!csrfToken) throw new Error('csrfToken 缺失');
+    logger.info('Sign up 点击未打开邮箱框，改走注册入口兜底');
+    try {
+        const authUrl = await Promise.race([
+            page.evaluate(async () => {
+                const csrfRes = await fetch('/api/auth/csrf', { credentials: 'include' });
+                if (!csrfRes.ok) throw new Error(`csrf HTTP ${csrfRes.status}`);
+                const csrfJson = await csrfRes.json() as { csrfToken?: unknown };
+                const csrfToken = typeof csrfJson.csrfToken === 'string' ? csrfJson.csrfToken : '';
+                if (!csrfToken) throw new Error('csrfToken 缺失');
 
-        const body = new URLSearchParams({
-            csrfToken,
-            callbackUrl: 'https://chatgpt.com/',
-            json: 'true',
-        });
-        const signinRes = await fetch('/api/auth/signin/openai', {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body,
-        });
-        if (!signinRes.ok) throw new Error(`signin HTTP ${signinRes.status}`);
-        const signinJson = await signinRes.json() as { url?: unknown };
-        if (typeof signinJson.url !== 'string' || !signinJson.url)
-            throw new Error('signin 未返回 url');
-        const url = new URL(signinJson.url);
-        url.searchParams.set('screen_hint', 'signup');
-        return url.toString();
+                const body = new URLSearchParams({
+                    csrfToken,
+                    callbackUrl: 'https://chatgpt.com/',
+                    json: 'true',
+                });
+                const signinRes = await fetch('/api/auth/signin/openai', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body,
+                });
+                if (!signinRes.ok) throw new Error(`signin HTTP ${signinRes.status}`);
+                const signinJson = await signinRes.json() as { url?: unknown };
+                if (typeof signinJson.url !== 'string' || !signinJson.url)
+                    throw new Error('signin 未返回 url');
+                const url = new URL(signinJson.url);
+                url.searchParams.set('screen_hint', 'signup');
+                return url.toString();
+            }),
+            new Promise<string>((_, reject) => setTimeout(() => reject(new Error('Auth API 超时')), 20_000)),
+        ]);
+        await page.goto(authUrl, { timeout: 45_000, waitUntil: 'domcontentloaded' });
+        return;
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.warn('Auth API 直达失败（%s），改打开 /auth/login?screen_hint=signup', message);
+    }
+    await page.goto('https://chatgpt.com/auth/login?screen_hint=signup', {
+        timeout: 45_000,
+        waitUntil: 'domcontentloaded',
     });
-    await page.goto(authUrl);
 }
 
 /** 识别 chrome-error 导航失败，避免误判为 unknown / 被 Protocol error 掩盖。 */
@@ -535,7 +548,10 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
             logger.info('711Proxy 预检通过：%s region=%s session=%s sessTime=%smin（PAC：静态资源直连，其余走代理）',
                 proxy.server, proxy.region, proxy.session, proxy.sessTime);
             chrome = await puppeteer.launch({
-                headless: os.platform() === 'linux', defaultViewport: null, protocolTimeout: MAX_TIMEOUT, slowMo: 20,
+                headless: os.platform() === 'linux',
+                // 固定视口：defaultViewport:null 在 headless Linux 上偶发 0x0，导致点击 Sign up 无 auth 请求、截图报 0 width
+                defaultViewport: { width: 1920, height: 1080 },
+                protocolTimeout: MAX_TIMEOUT, slowMo: 20,
                 handleSIGINT: false, handleSIGTERM: false, handleSIGHUP: false,
                 args: [
                     // PAC：静态资源直连，HTML/接口走日本代理（page.authenticate 仍作用于代理请求）
@@ -547,6 +563,7 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
             });
             logger.info(chrome.process()?.spawnfile, await chrome.version());
             page = await chrome.newPage();
+            await page.setViewport({ width: 1920, height: 1080 });
             await page.authenticate({ username: proxy.username, password: proxy.password });
             // 抓取全程 URL 写入 evidence，供分析哪些主机/资源不必走住宅代理
             networkCapture = installNetworkCapture(page, redactText);

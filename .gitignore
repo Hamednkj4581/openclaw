@@ -8,4 +8,5 @@ package-lock.json
 __pycache__/
 .DS_Store
 /forward_mailboxes.txt
-/测试数据.txt
+/测试邮箱.txt
+/PAT

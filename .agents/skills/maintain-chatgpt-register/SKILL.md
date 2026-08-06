@@ -9,7 +9,8 @@ description: 基于 GitHub Actions 实测结果维护本仓库的 ChatGPT 注册
 
 - 仓库默认只使用 `main` 一个分支，所有修改直接在 `main` 上进行；不得自行创建 feature、fix 或其他分支。只有用户主动、明确要求增加其他分支时才可例外，并在任务完成后按用户要求保留或清理。
 - 修改仓库文件前，必须先检查当前分支最近一次 GitHub Actions 运行；若该运行对应当前分支的最新提交或该运行无任何错误，可直接作为基线，否则必须重新触发并等待运行完成。不得在缺少有效基线的情况下开始修改，因为需要从基线获取调试数据来辅助修改。
-- `测试数据.txt` 第一行是 GitHub PAT，第二行是outlook账号信息，账号格式为 `email----email_password----client_id----refresh_token`，第三行是iCloud账号信息，格式为 `email----API_KEY`。账号信息仅作为 `accounts` 输入；`测试数据.txt` 必须保持未跟踪。
+- GitHub PAT 位于根目录 `PAT` 文件，规则见 `maintain-github-pat` skill。
+- `测试邮箱.txt` 仅存放待注册账号行（作为 `accounts` 输入），必须保持未跟踪。Outlook 格式为 `email----email_password----client_id----refresh_token`，iCloud/网页取件格式为 `email----API_KEY`，也可为单邮箱一行。
 - `forward_mailboxes.txt` 存放转发收件箱的 Outlook 凭据（`email----password----client_id----refresh_token`，可多行），必须保持未跟踪；对应 GitHub Secret 名为 `FORWARD_MAILBOXES`。
 - `accounts` 支持三种记录混用：单邮箱、Outlook 4 字段、iCloud/网页取件 2 字段。单邮箱账号依赖 workflow 输入 `forwarding_emails`（当前仅支持一个转发邮箱）登录对应转发箱，并按收件人过滤验证邮件。
 - PAT 的读取、校验、警告与禁止删除等规则见 `maintain-github-pat` skill，本 skill 不重复定义。
@@ -19,7 +20,7 @@ description: 基于 GitHub Actions 实测结果维护本仓库的 ChatGPT 注册
 ## 修改循环
 
 1. 检查 `git status`，确认位于 `main`（用户主动明确要求其他分支时除外），并检查工作流和相关源码。
-2. 修改前从 `测试数据.txt` 读取 PAT；用 `.github/scripts/sync_forward_mailboxes.py` **每次触发前**把 `forward_mailboxes.txt` upsert 到 Secret `FORWARD_MAILBOXES`（单次 API，可忽略性能影响），再触发当前工作分支的 `ci.yml`，等待运行结束。
+2. 修改前从 `PAT` 读取 token；用 `.github/scripts/sync_forward_mailboxes.py` **每次触发前**把 `forward_mailboxes.txt` upsert 到 Secret `FORWARD_MAILBOXES`（单次 API，可忽略性能影响），再触发当前工作分支的 `ci.yml`，等待运行结束。账号输入取自 `测试邮箱.txt`。
 3. 检查每个 `register (N)` job 的结论；不能只看工作流顶层结论，因为注册任务使用了 `continue-on-error`。
 4. 注册失败时下载该账号的失败日志和 `evidence-N`，结合最后几个阶段的 URL、标题、截图和 DOM 确定失败点。敏感数据只在进程内使用，产物下载到仓库外的临时目录。
 5. 先分类再处理：

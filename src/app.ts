@@ -31,7 +31,7 @@ function redactHtml(html: string): string {
     let redacted = html
         .replace(/(<input\b[^>]*\bvalue=["'])[^"']*(["'])/gi, '$1[REDACTED]$2')
         .replace(/(<input\b[^>]*\b(?:type=["']password["']|name=["'](?:code|otp|token|password)["'])[^>]*\bvalue=["'])[^"']*(["'])/gi, '$1[REDACTED]$2')
-        .replace(/(authorization|refresh_token|access_token|accessToken|otpSecret)(["'\s:=]+)[^"'\s<]+/gi, '$1$2[REDACTED]');
+        .replace(/(authorization|refresh_token|access_token|accessToken|sessionToken|otpSecret)(["'\s:=]+)[^"'\s<]+/gi, '$1$2[REDACTED]');
     for (const value of sensitiveValues)
         if (value) redacted = redacted.replaceAll(value, '[REDACTED]');
     return redacted;
@@ -242,24 +242,79 @@ async function fillProfileIfPresent(page: Page, email: string): Promise<boolean>
     return true;
 }
 
-async function extractAccessToken(page: Page): Promise<string> {
+/** 导出格式与截图一致：session 接口字段 + Cookie 中的 sessionToken */
+type SessionExport = {
+    user: { id: string; email: string };
+    expires: string;
+    account: { id: string; planType: string };
+    accessToken: string;
+    sessionToken: string;
+    authProvider: string;
+};
+
+/** 读取 next-auth session cookie；过长时会被拆成 .0/.1/... 分片，需按序号拼接 */
+function readSessionTokenFromCookies(cookies: Array<{ name: string; value: string }>): string | null {
+    const exact = cookies.find(c => c.name === '__Secure-next-auth.session-token' || c.name === 'next-auth.session-token');
+    if (exact?.value) return exact.value;
+
+    const chunkRe = /^(?:__Secure-)?next-auth\.session-token\.(\d+)$/;
+    const chunks = cookies
+        .flatMap(c => {
+            const match = c.name.match(chunkRe);
+            return match ? [{ index: Number(match[1]), value: c.value }] : [];
+        })
+        .sort((a, b) => a.index - b.index);
+    if (!chunks.length) return null;
+    const token = chunks.map(c => c.value).join('');
+    return token || null;
+}
+
+function writeSessionJson(session: SessionExport): void {
+    const filePath = process.env.ACCOUNT_SESSION_JSON_PATH || 'session.json';
+    fs.writeFileSync(filePath, JSON.stringify(session, null, 2) + '\n');
+    logger.info('已导出 session JSON：%s', filePath);
+}
+
+async function extractSessionExport(page: Page): Promise<SessionExport> {
     return Utility.waitForFunction(async () => {
         try {
-            const accessToken = await page.evaluate(async () => {
+            const data = await page.evaluate(async () => {
                 const response = await fetch('/api/auth/session', { credentials: 'include' });
                 if (!response.ok)
                     throw new Error(`session HTTP ${response.status}`);
-                const data = await response.json() as { accessToken?: unknown };
-                return typeof data.accessToken === 'string' && data.accessToken ? data.accessToken : null;
+                return await response.json() as Record<string, unknown>;
             });
-            return accessToken;
+            const accessToken = typeof data.accessToken === 'string' ? data.accessToken : '';
+            if (!accessToken) return null;
+
+            const user = data.user && typeof data.user === 'object' ? data.user as Record<string, unknown> : undefined;
+            const account = data.account && typeof data.account === 'object' ? data.account as Record<string, unknown> : undefined;
+            const userId = typeof user?.id === 'string' ? user.id : '';
+            const userEmail = typeof user?.email === 'string' ? user.email : '';
+            const expires = typeof data.expires === 'string' ? data.expires : '';
+            const accountId = typeof account?.id === 'string' ? account.id : '';
+            const planType = typeof account?.planType === 'string' ? account.planType : '';
+            const authProvider = typeof data.authProvider === 'string' && data.authProvider ? data.authProvider : 'openai';
+            if (!userId || !userEmail || !expires || !accountId || !planType) return null;
+
+            const sessionToken = readSessionTokenFromCookies(await page.cookies());
+            if (!sessionToken) return null;
+
+            return {
+                user: { id: userId, email: userEmail },
+                expires,
+                account: { id: accountId, planType },
+                accessToken,
+                sessionToken,
+                authProvider,
+            };
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             if (/session HTTP/i.test(message)) return null;
-            throw new Error(`提取 ChatGPT accessToken 失败：${message}`);
+            throw new Error(`提取 ChatGPT session 失败：${message}`);
         }
     }, { pollInterval: 500, timeout: 30_000 }).catch(() => {
-        throw new Error('已登录但 /api/auth/session 未返回 accessToken');
+        throw new Error('已登录但未能导出完整 session JSON（accessToken/sessionToken）');
     });
 }
 
@@ -510,13 +565,15 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
         }
         await evidence(page, 'authenticated');
         const otpSecret = enableChatGptMfa ? await enableMfa(page, evidence) : undefined;
-        const accessToken = await extractAccessToken(page);
-        sensitiveValues.add(accessToken);
+        const session = await extractSessionExport(page);
+        sensitiveValues.add(session.accessToken);
+        sensitiveValues.add(session.sessionToken);
         await evidence(page, 'access-token-ready');
         Utility.appendStepSummary(
-            [email, chatGptPassword, ...(otpSecret ? [otpSecret] : []), accessToken, new Date().toString()].join('----')
+            [email, chatGptPassword, ...(otpSecret ? [otpSecret] : []), session.accessToken, new Date().toString()].join('----')
         );
-        logger.info('ChatGPT 注册完成%s，已提取 accessToken', otpSecret ? '，已开启 2FA' : '');
+        writeSessionJson(session);
+        logger.info('ChatGPT 注册完成%s，已提取 accessToken 并导出 session JSON', otpSecret ? '，已开启 2FA' : '');
     } catch (error) {
         await fail(error);
     } finally {

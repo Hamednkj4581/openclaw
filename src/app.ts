@@ -229,9 +229,33 @@ async function extractAccessToken(page: Page): Promise<string> {
     });
 }
 
+/** 注册后可能弹出 You're all set 引导层，挡住设置面板交互。 */
+async function dismissYoureAllSetIfPresent(page: Page): Promise<void> {
+    const dialog = await first(page, [
+        "//dialog[@aria-label=\"You're all set\" and @open]",
+        "//*[@aria-modal='true'][.//*[normalize-space(.)=\"You're all set\"]]"
+    ]);
+    if (!dialog) return;
+    const continueButton = await first(page, [
+        "//dialog[@aria-label=\"You're all set\"]//button[normalize-space(.)='Continue']",
+        "//*[@aria-modal='true'][.//*[normalize-space(.)=\"You're all set\"]]//button[normalize-space(.)='Continue']"
+    ]);
+    if (!continueButton) throw new Error('检测到 You\'re all set 引导层，但找不到 Continue');
+    await continueButton.click();
+    await Utility.waitForFunction(async () => !(await first(page, [
+        "//dialog[@aria-label=\"You're all set\" and @open]",
+        "//*[@aria-modal='true'][.//*[normalize-space(.)=\"You're all set\"]]"
+    ])), { timeout: 15_000 });
+}
+
 async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Promise<void>): Promise<string> {
     await page.goto('https://chatgpt.com/#settings/Security');
+    await dismissYoureAllSetIfPresent(page);
+    // 关闭引导层后 hash 路由可能被冲掉，再进一次安全设置
+    if (!/#settings\/Security/i.test(page.url()))
+        await page.goto('https://chatgpt.com/#settings/Security');
     const authenticatorToggle = await Utility.waitForFunction(() => first(page, [
+        "//button[@data-testid='mfa-authenticator-toggle' and @role='switch']",
         "//button[@aria-label='Multi-factor authentication']",
         "//button[@role='switch' and contains(translate(@aria-label, 'AUTHENTICATOR', 'authenticator'), 'authenticator')]",
         "//*[normalize-space(.)='Authenticator app']/ancestor::*[.//button[@role='switch']][1]//button[@role='switch']"

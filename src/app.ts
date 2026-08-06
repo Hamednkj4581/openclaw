@@ -69,8 +69,12 @@ async function captureErrorEvidence(browser: Browser) {
 
 async function first(page: Page, selectors: string[]): Promise<ElementHandle<Element> | null> {
     for (const selector of selectors) {
-        const element = await page.$x(selector, { timeout: 0 });
-        if (element) return element as ElementHandle<Element>;
+        // 同一选择器可能命中隐藏副本（如侧栏悬停卡片），只返回可见元素
+        const elements = await page.mainFrame().$$(selector) as ElementHandle<Element>[];
+        for (const element of elements) {
+            if (await element.isVisible().catch(() => false))
+                return element;
+        }
     }
     return null;
 }

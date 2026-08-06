@@ -1,6 +1,9 @@
 export const SIGNUP_SELECTORS = [
-    // 当前匿名首页顶栏按钮（证据 DOM：data-testid="signup-button"）
+    // 旧版 React 首页顶栏
     "//button[@data-testid='signup-button' and not(@disabled)]",
+    // 新版 lightweight shell 顶栏（证据：wm-app-signupButton；同页还有隐藏卡片内的 signup 副本）
+    "//button[contains(@class,'wm-app-signupButton') and not(@disabled)]",
+    "//button[@data-mobile-auth-entry-action='signup' and @data-mobile-auth-entry-point='mobile_chat_stage_header' and not(@disabled)]",
     "//button[@data-mobile-auth-entry-action='signup' and not(@disabled)]",
     "//button[contains(normalize-space(string(.)), 'Sign up for free') or normalize-space(string(.))='Sign up']",
     "//a[contains(@href, 'signup') and not(@aria-disabled='true')]"

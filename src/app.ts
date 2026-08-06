@@ -104,6 +104,20 @@ async function clickContinue(page: Page): Promise<void> {
     }
 }
 
+/** 等待注册/登录页出现可见邮箱框（代理下 goto 超时不代表页面没出来）。 */
+async function waitForSignupEmail(page: Page, timeoutMs: number): Promise<boolean> {
+    const found = await Utility.waitForFunction(
+        async () => {
+            await assertNoChromeNavigationFailure(page);
+            // 打开过程中可能出现 Turnstile，需边等边解，否则邮箱框一直不渲染
+            await solveCloudflareIfPresent(page, 1);
+            return first(page, SIGNUP_EMAIL_SELECTORS);
+        },
+        { pollInterval: 400, timeout: timeoutMs }
+    ).catch(() => null);
+    return !!found;
+}
+
 /** 点击注册入口并等待邮箱弹层；首页慢加载/水合未完成时单次 click 可能无效，故重试。 */
 async function openSignup(page: Page): Promise<void> {
     if (await first(page, SIGNUP_EMAIL_SELECTORS)) return;
@@ -115,6 +129,7 @@ async function openSignup(page: Page): Promise<void> {
         // 代理隧道失败时页面停在 chrome-error，继续找 Sign up 只会空转至超时
         await assertNoChromeNavigationFailure(page);
         if (await first(page, SIGNUP_EMAIL_SELECTORS)) return;
+        await solveCloudflareIfPresent(page, 1);
 
         const button = await first(page, SIGNUP_SELECTORS);
         if (!button) {
@@ -124,6 +139,8 @@ async function openSignup(page: Page): Promise<void> {
                 triedAuthApi = true;
                 try {
                     await startSignupViaAuthApi(page);
+                    // goto 在慢代理上常超时，但页面可能已落到带邮箱框的登录页
+                    if (await waitForSignupEmail(page, 45_000)) return;
                     lastError = 'Auth API 已跳转，但邮箱输入框未出现';
                 } catch (error) {
                     lastError = error instanceof Error ? error.message : String(error);
@@ -158,12 +175,16 @@ async function openSignup(page: Page): Promise<void> {
             triedAuthApi = true;
             try {
                 await startSignupViaAuthApi(page);
+                if (await waitForSignupEmail(page, 45_000)) return;
                 lastError = 'Auth API 已跳转，但邮箱输入框未出现';
             } catch (error) {
                 lastError = error instanceof Error ? error.message : String(error);
             }
         }
     }
+
+    // 截止后仍再等一轮：patches.goto 超时重试会中断加载，最终页却常已带邮箱框
+    if (await waitForSignupEmail(page, 20_000)) return;
 
     await assertNoChromeNavigationFailure(page);
     const title = await page.title().catch(() => '');
@@ -173,6 +194,12 @@ async function openSignup(page: Page): Promise<void> {
 /** 首页 Sign up 点击无响应时，用 NextAuth 或 /auth/login 直达注册页 */
 async function startSignupViaAuthApi(page: Page): Promise<void> {
     logger.info('Sign up 点击未打开邮箱框，改走注册入口兜底');
+    const gotoOpts = {
+        // 慢代理上 domcontentloaded 常超 45s；多轮 retries 会取消已在加载的文档
+        timeout: 60_000,
+        waitUntil: 'domcontentloaded' as const,
+        retries: 1,
+    };
     try {
         const authUrl = await Promise.race([
             page.evaluate(async () => {
@@ -203,16 +230,14 @@ async function startSignupViaAuthApi(page: Page): Promise<void> {
             }),
             new Promise<string>((_, reject) => setTimeout(() => reject(new Error('Auth API 超时')), 20_000)),
         ]);
-        await page.goto(authUrl, { timeout: 45_000, waitUntil: 'domcontentloaded' });
+        await page.goto(authUrl, gotoOpts);
         return;
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         logger.warn('Auth API 直达失败（%s），改打开 /auth/login?screen_hint=signup', message);
     }
-    await page.goto('https://chatgpt.com/auth/login?screen_hint=signup', {
-        timeout: 45_000,
-        waitUntil: 'domcontentloaded',
-    });
+    // patches.goto 耗尽重试后不抛错；外层靠 waitForSignupEmail 判定是否真正打开
+    await page.goto('https://chatgpt.com/auth/login?screen_hint=signup', gotoOpts);
 }
 
 /** 识别 chrome-error 导航失败，避免误判为 unknown / 被 Protocol error 掩盖。 */

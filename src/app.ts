@@ -174,12 +174,19 @@ async function detectState(page: Page): Promise<RegistrationState> {
     try {
         // 注册弹层仍可能停在 chatgpt.com，且页面上有 textarea/contenteditable；有邮箱输入框时不算已登录。
         if (/chatgpt\.com\/(?:\?|$)|chatgpt\.com\/(?:c|g|share)\//i.test(url) && !/auth|login|signup|verify/i.test(url)
-            && !await first(page, SIGNUP_EMAIL_SELECTORS)
-            && await first(page, [
+            && !await first(page, SIGNUP_EMAIL_SELECTORS)) {
+            // 注册完成后的 You're all set 会挡住主界面；出现即表示已登录成功
+            if (await first(page, [
+                "//dialog[@aria-label=\"You're all set\" and @open]",
+                "//*[@aria-modal='true'][.//*[normalize-space(.)=\"You're all set\"]]"
+            ])) return 'authenticated';
+            if (await first(page, [
                 "//textarea[@id='prompt-textarea' or @name='prompt-textarea' or contains(@placeholder, 'Ask') or contains(@placeholder, 'Message')]",
                 "//*[@contenteditable='true' and (@id='prompt-textarea' or contains(@data-testid, 'composer') or contains(@placeholder, 'Ask') or contains(@placeholder, 'Message'))]",
+                "//button[@data-testid='accounts-profile-button']",
                 "//button[contains(@aria-label, 'profile') or contains(@data-testid, 'profile')]"
             ])) return 'authenticated';
+        }
         if (await first(page, ["//input[@type='password' and not(@disabled)]"])) return 'password';
         if (/\/about-you(?:[/?#]|$)/i.test(url) || await first(page, ["//input[@placeholder='Full name' or @name='name']", "//input[@name='age' or @name='birthday']", "//*[@data-type='month']"])) return 'profile';
         if (/\/mfa-challenge(?:[/?#]|$)/i.test(url) || await first(page, MFA_CHALLENGE_SELECTORS)) return 'mfa-challenge';
@@ -266,7 +273,9 @@ async function dismissYoureAllSetIfPresent(page: Page): Promise<void> {
         "//*[@aria-modal='true'][.//*[normalize-space(.)=\"You're all set\"]]//button[normalize-space(.)='Continue']"
     ]);
     if (!continueButton) throw new Error('检测到 You\'re all set 引导层，但找不到 Continue');
-    await continueButton.click();
+    const box = await continueButton.boundingBox();
+    if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    else await continueButton.evaluate(el => (el as HTMLElement).click());
     await Utility.waitForFunction(async () => !(await first(page, [
         "//dialog[@aria-label=\"You're all set\" and @open]",
         "//*[@aria-modal='true'][.//*[normalize-space(.)=\"You're all set\"]]"
@@ -274,9 +283,10 @@ async function dismissYoureAllSetIfPresent(page: Page): Promise<void> {
 }
 
 async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Promise<void>): Promise<string> {
+    // 先关掉引导层再进设置，避免 hash 路由被挡住
+    await dismissYoureAllSetIfPresent(page);
     await page.goto('https://chatgpt.com/#settings/Security');
     await dismissYoureAllSetIfPresent(page);
-    // 关闭引导层后 hash 路由可能被冲掉，再进一次安全设置
     if (!/#settings\/Security/i.test(page.url()))
         await page.goto('https://chatgpt.com/#settings/Security');
     const authenticatorToggle = await Utility.waitForFunction(() => first(page, [

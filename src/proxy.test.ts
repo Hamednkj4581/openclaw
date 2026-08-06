@@ -74,3 +74,8 @@ test('rotateStickySession refreshes session id in username', () => {
     assert.match(proxy.username, new RegExp(`-session-${proxy.session}-sessTime-`));
     assert.doesNotMatch(proxy.username, new RegExp(`-session-${before.session}-sessTime-`));
 });
+
+test('probeChatgptViaProxy is exported for HTTPS tunnel preflight', async () => {
+    const { probeChatgptViaProxy } = await import('./proxy.js');
+    assert.equal(typeof probeChatgptViaProxy, 'function');
+});

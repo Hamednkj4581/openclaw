@@ -12,12 +12,14 @@ import githubAnnotation from './annotations.js';
 import { credentialsFromEnv, preflightMail, waitForMailVerification } from './mailProvider.js';
 import { installTurnstileHook, solveCloudflareIfPresent, validateCapSolver } from './capsolver.js';
 import { installNetworkCapture } from './networkCapture.js';
-import { buildJapanStickyProxy, buildProxyPacUrl, preflightProxy } from './proxy.js';
+import { buildJapanStickyProxy, buildProxyPacUrl, preflightProxy, rotateStickySession } from './proxy.js';
 import { MFA_CHALLENGE_SELECTORS, MFA_CODE_SELECTORS, MFA_ENABLED_SELECTORS, MFA_VERIFY_SELECTORS, SIGNUP_EMAIL_SELECTORS, SIGNUP_SELECTORS } from './selectors.js';
 
 const MAX_TIMEOUT = Math.pow(2, 31) - 1;
 const EVIDENCE_TIMEOUT_MS = 15_000;
 const VERIFICATION_EMAIL_TIMEOUT_MS = 30_000;
+/** 浏览器打开 chatgpt.com 仍隧道失败时，换 sticky session 重开的次数 */
+const MAX_OPEN_CHATGPT_ATTEMPTS = 3;
 type RegistrationState = 'password' | 'email-verification' | 'code' | 'profile' | 'authenticated' | 'mfa-challenge' | 'unknown';
 const sensitiveValues = new Set<string>();
 
@@ -109,6 +111,8 @@ async function openSignup(page: Page): Promise<void> {
     const deadline = Date.now() + 60_000;
     let lastError = '';
     while (Date.now() < deadline) {
+        // 代理隧道失败时页面停在 chrome-error，继续找 Sign up 只会空转至超时
+        await assertNoChromeNavigationFailure(page);
         if (await first(page, SIGNUP_EMAIL_SELECTORS)) return;
 
         const button = await first(page, SIGNUP_SELECTORS);
@@ -138,6 +142,7 @@ async function openSignup(page: Page): Promise<void> {
         lastError = '已点击 Sign up，但邮箱输入框未出现';
     }
 
+    await assertNoChromeNavigationFailure(page);
     const title = await page.title().catch(() => '');
     throw new Error(`打开 ChatGPT 注册入口超时（${lastError || '未知'}），URL：${page.url().replace(/[?#].*$/, '')}，标题：${title}`);
 }
@@ -279,13 +284,29 @@ function youreAllSetOpen(page: Page): Promise<boolean> {
 /** 注册后可能弹出 You're all set 引导层，挡住设置面板交互。 */
 async function dismissYoureAllSetIfPresent(page: Page): Promise<void> {
     if (!await youreAllSetOpen(page)) return;
+    // Continue 常短暂 disabled + spinner；点禁用按钮无效，先等到可点
+    const ready = await Utility.waitForFunction(async () => {
+        if (!await youreAllSetOpen(page)) return 'gone' as const;
+        return page.evaluate(() => {
+            const dialog = document.querySelector('dialog[aria-label="You\'re all set"][open]')
+                ?? Array.from(document.querySelectorAll('[aria-modal="true"]'))
+                    .find(el => (el.textContent ?? '').includes("You're all set"));
+            if (!dialog) return 'gone';
+            const button = Array.from(dialog.querySelectorAll('button'))
+                .find(el => (el.textContent ?? '').replace(/\s+/g, ' ').trim().startsWith('Continue')) as HTMLButtonElement | undefined;
+            if (!button) return null;
+            if (button.disabled || button.getAttribute('aria-disabled') === 'true') return null;
+            return 'ready';
+        });
+    }, { timeout: 60_000 });
+    if (ready === 'gone') return;
     const clicked = await page.evaluate(() => {
         const dialog = document.querySelector('dialog[aria-label="You\'re all set"][open]')
             ?? Array.from(document.querySelectorAll('[aria-modal="true"]'))
                 .find(el => (el.textContent ?? '').includes("You're all set"));
         if (!dialog) return false;
         const button = Array.from(dialog.querySelectorAll('button'))
-            .find(el => (el.textContent ?? '').replace(/\s+/g, ' ').trim().startsWith('Continue'));
+            .find(el => (el.textContent ?? '').replace(/\s+/g, ' ').trim().startsWith('Continue')) as HTMLButtonElement | undefined;
         if (!button) return false;
         button.click();
         return true;
@@ -395,29 +416,46 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
         const proxy = buildJapanStickyProxy();
         sensitiveValues.add(proxy.password);
         sensitiveValues.add(process.env.PROXY_USERNAME ?? '');
-        await preflightProxy(proxy);
-        logger.info('711Proxy 预检通过：%s region=%s session=%s sessTime=%smin（PAC：静态资源直连，其余走代理）', proxy.server, proxy.region, proxy.session, proxy.sessTime);
         const registrationStartedAt = new Date(Date.now() - 30_000);
         const enableChatGptMfa = ['1', 'true'].includes((process.env.ENABLE_CHATGPT_MFA ?? 'true').toLowerCase());
         const chatGptPassword = generatePassword();
-        chrome = await puppeteer.launch({
-            headless: os.platform() === 'linux', defaultViewport: null, protocolTimeout: MAX_TIMEOUT, slowMo: 20,
-            handleSIGINT: false, handleSIGTERM: false, handleSIGHUP: false,
-            args: [
-                // PAC：静态资源直连，HTML/接口走日本代理（page.authenticate 仍作用于代理请求）
-                `--proxy-pac-url=${buildProxyPacUrl(proxy)}`,
-                '--lang=en-US', '--window-size=1920,1080', '--disable-blink-features=AutomationControlled',
-                '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas', '--no-zygote', '--disable-gpu'
-            ]
-        });
-        logger.info(chrome.process()?.spawnfile, await chrome.version());
-        const page = await chrome.newPage();
-        await page.authenticate({ username: proxy.username, password: proxy.password });
-        // 抓取全程 URL 写入 evidence，供分析哪些主机/资源不必走住宅代理
-        networkCapture = installNetworkCapture(page, redactText);
-        await installTurnstileHook(page);
-        await page.goto('https://chatgpt.com/');
+        let page!: Page;
+        for (let attempt = 1; attempt <= MAX_OPEN_CHATGPT_ATTEMPTS; attempt++) {
+            await preflightProxy(proxy);
+            logger.info('711Proxy 预检通过：%s region=%s session=%s sessTime=%smin（PAC：静态资源直连，其余走代理）',
+                proxy.server, proxy.region, proxy.session, proxy.sessTime);
+            chrome = await puppeteer.launch({
+                headless: os.platform() === 'linux', defaultViewport: null, protocolTimeout: MAX_TIMEOUT, slowMo: 20,
+                handleSIGINT: false, handleSIGTERM: false, handleSIGHUP: false,
+                args: [
+                    // PAC：静态资源直连，HTML/接口走日本代理（page.authenticate 仍作用于代理请求）
+                    `--proxy-pac-url=${buildProxyPacUrl(proxy)}`,
+                    '--lang=en-US', '--window-size=1920,1080', '--disable-blink-features=AutomationControlled',
+                    '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
+                    '--disable-accelerated-2d-canvas', '--no-zygote', '--disable-gpu'
+                ]
+            });
+            logger.info(chrome.process()?.spawnfile, await chrome.version());
+            page = await chrome.newPage();
+            await page.authenticate({ username: proxy.username, password: proxy.password });
+            // 抓取全程 URL 写入 evidence，供分析哪些主机/资源不必走住宅代理
+            networkCapture = installNetworkCapture(page, redactText);
+            await installTurnstileHook(page);
+            await page.goto('https://chatgpt.com/');
+            // patches 的 goto 耗尽重试后可能静默停在 chrome-error / about:blank，需主动识别并换出口
+            const navError = await chromeNavigationFailure(page)
+                ?? (!/chatgpt\.com/i.test(page.url())
+                    ? `打开 ChatGPT 失败，当前 URL：${page.url().replace(/[?#].*$/, '') || 'about:blank'}`
+                    : null);
+            if (!navError) break;
+            logger.warn('打开 ChatGPT 失败（%s/%s）：%s', attempt, MAX_OPEN_CHATGPT_ATTEMPTS, navError);
+            networkCapture?.flush();
+            networkCapture = undefined;
+            await chrome.close().catch(() => undefined);
+            chrome = undefined;
+            if (attempt >= MAX_OPEN_CHATGPT_ATTEMPTS) throw new Error(navError);
+            rotateStickySession(proxy);
+        }
         await evidence(page, 'chatgpt-opened');
         await solveCloudflareIfPresent(page);
         await evidence(page, 'initial-turnstile-checked');

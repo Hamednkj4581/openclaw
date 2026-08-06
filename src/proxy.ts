@@ -129,7 +129,28 @@ export function decideProxyRegion(
     return { ok: false, ip, countries, detail: `出口国家为 ${countries.join('/')}，期望 ${expected}（ip=${ip}；${summary}）` };
 }
 
-/** 启动浏览器前预检：多源核对出口国；确认非目标国则换 sticky session 重试 */
+/** 经代理探测 chatgpt.com：地理预检通过不代表 HTTPS 隧道可用（常见 ERR_TUNNEL_CONNECTION_FAILED） */
+export async function probeChatgptViaProxy(
+    axiosProxy: { protocol: 'http'; host: string; port: number; auth: { username: string; password: string } }
+): Promise<void> {
+    await axios.request({
+        method: 'GET',
+        url: 'https://chatgpt.com/',
+        timeout: 20_000,
+        proxy: axiosProxy,
+        maxRedirects: 5,
+        // 任意 HTTP 响应都说明隧道已通；连接级失败才会抛错
+        validateStatus: () => true,
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+        // 避免把整页 HTML 读进内存
+        responseType: 'stream',
+        maxContentLength: 64 * 1024,
+    }).then(response => {
+        response.data?.destroy?.();
+    });
+}
+
+/** 启动浏览器前预检：多源核对出口国，并探测 ChatGPT HTTPS 隧道；失败则换 sticky session 重试 */
 export async function preflightProxy(proxy: ProxyConfig): Promise<void> {
     const axiosProxy = {
         protocol: 'http' as const,
@@ -153,18 +174,29 @@ export async function preflightProxy(proxy: ProxyConfig): Promise<void> {
             }
         }
         const decision = decideProxyRegion(proxy.region, samples);
-        if (decision.ok) {
-            if (/冲突/.test(decision.detail)) logger.warn('711Proxy 预检：%s', decision.detail);
-            else logger.info('711Proxy 预检通过：%s', decision.detail);
+        if (!decision.ok) {
+            lastMismatch = decision.detail || '711Proxy 预检失败';
+            if (!samples.some(s => s.country)) {
+                throw new Error(lastMismatch.startsWith('711Proxy') ? lastMismatch : `711Proxy 预检失败：${lastMismatch}`);
+            }
+            if (sessionAttempt >= MAX_SESSION_ATTEMPTS) break;
+            logger.warn('711Proxy %s；更换 sticky session 重试 %s/%s', lastMismatch, sessionAttempt + 1, MAX_SESSION_ATTEMPTS);
+            rotateStickySession(proxy);
+            continue;
+        }
+        if (/冲突/.test(decision.detail)) logger.warn('711Proxy 预检：%s', decision.detail);
+        else logger.info('711Proxy 预检通过：%s', decision.detail);
+
+        try {
+            await probeChatgptViaProxy(axiosProxy);
+            logger.info('711Proxy ChatGPT 连通预检通过：session=%s', proxy.session);
             return;
+        } catch (error) {
+            lastMismatch = `ChatGPT HTTPS 隧道不可用（${axios.isAxiosError(error) ? error.message : String(error)}）`;
+            if (sessionAttempt >= MAX_SESSION_ATTEMPTS) break;
+            logger.warn('711Proxy %s；更换 sticky session 重试 %s/%s', lastMismatch, sessionAttempt + 1, MAX_SESSION_ATTEMPTS);
+            rotateStickySession(proxy);
         }
-        lastMismatch = decision.detail || '711Proxy 预检失败';
-        if (!samples.some(s => s.country)) {
-            throw new Error(lastMismatch.startsWith('711Proxy') ? lastMismatch : `711Proxy 预检失败：${lastMismatch}`);
-        }
-        if (sessionAttempt >= MAX_SESSION_ATTEMPTS) break;
-        logger.warn('711Proxy %s；更换 sticky session 重试 %s/%s', lastMismatch, sessionAttempt + 1, MAX_SESSION_ATTEMPTS);
-        rotateStickySession(proxy);
     }
     throw new Error(`711Proxy ${lastMismatch}`);
 }

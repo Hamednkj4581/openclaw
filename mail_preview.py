@@ -170,6 +170,14 @@ def build_mail_preview_html(body_html, message, mailbox):
     )
 
 
+def sanitize_path_part(value, fallback, max_len=120):
+    """清洗路径片段，去掉 Windows 非法字符并限制长度。"""
+    if not value:
+        return fallback
+    name = re.sub(r'[<>:"/\\|?*\s]+', "_", value).strip("._")
+    return (name or fallback)[:max_len]
+
+
 def sanitize_recipient_folder(recipient):
     """从收件人字段提取可用作目录名的邮箱或安全字符串。"""
     if not recipient:
@@ -177,19 +185,22 @@ def sanitize_recipient_folder(recipient):
 
     match = re.search(r"[\w.+-]+@[\w.-]+\.\w+", recipient)
     name = match.group(0) if match else recipient
-    name = re.sub(r'[<>:"/\\|?*\s]+', "_", name).strip("._")
-    return (name or "unknown_recipient")[:120]
+    return sanitize_path_part(name, "unknown_recipient")
 
 
-def save_mail_preview_html(date_header, html_content, recipient):
-    """按收件人建子目录，再按邮件时间保存 HTML；同秒冲突时追加序号。"""
+def save_mail_preview_html(date_header, html_content, recipient, subject):
+    """按收件人建子目录，以「时间_主题」保存 HTML；冲突时追加序号。"""
     folder = MAIL_PREVIEW_DIR / sanitize_recipient_folder(recipient)
     folder.mkdir(parents=True, exist_ok=True)
     mail_time = parse_mail_datetime(date_header)
     if mail_time is None:
-        stem = "unknown_time"
+        time_part = "unknown_time"
     else:
-        stem = mail_time.astimezone(SHANGHAI_TIMEZONE).strftime("%Y-%m-%d_%H-%M-%S")
+        time_part = mail_time.astimezone(SHANGHAI_TIMEZONE).strftime(
+            "%Y-%m-%d_%H-%M-%S"
+        )
+    subject_part = sanitize_path_part(subject, "no_subject", max_len=80)
+    stem = f"{time_part}_{subject_part}"
 
     path = folder / f"{stem}.html"
     suffix = 2
@@ -297,7 +308,7 @@ def list_all_emails(email_user, access_token):
                         html_content, message, mailbox
                     )
                     preview_path = save_mail_preview_html(
-                        date_header, preview_html, recipient
+                        date_header, preview_html, recipient, subject
                     )
 
                 results.append(

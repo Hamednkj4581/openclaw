@@ -176,10 +176,7 @@ async function detectState(page: Page): Promise<RegistrationState> {
         if (/chatgpt\.com\/(?:\?|$)|chatgpt\.com\/(?:c|g|share)\//i.test(url) && !/auth|login|signup|verify/i.test(url)
             && !await first(page, SIGNUP_EMAIL_SELECTORS)) {
             // 注册完成后的 You're all set 会挡住主界面；出现即表示已登录成功
-            if (await first(page, [
-                "//dialog[@aria-label=\"You're all set\" and @open]",
-                "//*[@aria-modal='true'][.//*[normalize-space(.)=\"You're all set\"]]"
-            ])) return 'authenticated';
+            if (await youreAllSetOpen(page)) return 'authenticated';
             if (await first(page, [
                 "//textarea[@id='prompt-textarea' or @name='prompt-textarea' or contains(@placeholder, 'Ask') or contains(@placeholder, 'Message')]",
                 "//*[@contenteditable='true' and (@id='prompt-textarea' or contains(@data-testid, 'composer') or contains(@placeholder, 'Ask') or contains(@placeholder, 'Message'))]",
@@ -261,44 +258,68 @@ async function extractAccessToken(page: Page): Promise<string> {
     });
 }
 
+/** 不要求可见：You're all set 弹层常带 aria-hidden，isVisible 会误判为不存在。 */
+async function firstPresent(page: Page, selectors: string[]): Promise<ElementHandle<Element> | null> {
+    for (const selector of selectors) {
+        const element = await page.$x(selector, { timeout: 0, visible: false });
+        if (element) return element as ElementHandle<Element>;
+    }
+    return null;
+}
+
+function youreAllSetOpen(page: Page): Promise<boolean> {
+    return page.evaluate(() => {
+        const dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="You\'re all set"][open]');
+        if (dialog) return true;
+        return Array.from(document.querySelectorAll('[aria-modal="true"]'))
+            .some(el => (el.textContent ?? '').includes("You're all set"));
+    });
+}
+
 /** 注册后可能弹出 You're all set 引导层，挡住设置面板交互。 */
 async function dismissYoureAllSetIfPresent(page: Page): Promise<void> {
-    const dialog = await first(page, [
-        "//dialog[@aria-label=\"You're all set\" and @open]",
-        "//*[@aria-modal='true'][.//*[normalize-space(.)=\"You're all set\"]]"
-    ]);
-    if (!dialog) return;
-    const continueButton = await first(page, [
-        "//dialog[@aria-label=\"You're all set\"]//button[normalize-space(.)='Continue']",
-        "//*[@aria-modal='true'][.//*[normalize-space(.)=\"You're all set\"]]//button[normalize-space(.)='Continue']"
-    ]);
-    if (!continueButton) throw new Error('检测到 You\'re all set 引导层，但找不到 Continue');
-    const box = await continueButton.boundingBox();
-    if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-    else await continueButton.evaluate(el => (el as HTMLElement).click());
-    await Utility.waitForFunction(async () => !(await first(page, [
-        "//dialog[@aria-label=\"You're all set\" and @open]",
-        "//*[@aria-modal='true'][.//*[normalize-space(.)=\"You're all set\"]]"
-    ])), { timeout: 15_000 });
+    if (!await youreAllSetOpen(page)) return;
+    const clicked = await page.evaluate(() => {
+        const dialog = document.querySelector('dialog[aria-label="You\'re all set"][open]')
+            ?? Array.from(document.querySelectorAll('[aria-modal="true"]'))
+                .find(el => (el.textContent ?? '').includes("You're all set"));
+        if (!dialog) return false;
+        const button = Array.from(dialog.querySelectorAll('button'))
+            .find(el => (el.textContent ?? '').replace(/\s+/g, ' ').trim().startsWith('Continue'));
+        if (!button) return false;
+        button.click();
+        return true;
+    });
+    if (!clicked) {
+        // 回退到句柄点击（含 spinner 的 Continue 文案可能带额外 SVG）
+        const continueButton = await firstPresent(page, [
+            "//dialog[@aria-label=\"You're all set\"]//button[contains(normalize-space(.), 'Continue')]",
+            "//*[@aria-modal='true'][.//*[normalize-space(.)=\"You're all set\"]]//button[contains(normalize-space(.), 'Continue')]"
+        ]);
+        if (!continueButton) throw new Error('检测到 You\'re all set 引导层，但找不到 Continue');
+        await continueButton.evaluate(el => (el as HTMLElement).click());
+    }
+    await Utility.waitForFunction(async () => (await youreAllSetOpen(page)) ? null : true, { timeout: 30_000 });
 }
 
 async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Promise<void>): Promise<string> {
-    // 先关掉引导层再进设置，避免 hash 路由被挡住
+    // 先关掉引导层再进设置；hash 跳转后弹层可能再次出现
     await dismissYoureAllSetIfPresent(page);
     await page.goto('https://chatgpt.com/#settings/Security');
-    await dismissYoureAllSetIfPresent(page);
-    if (!/#settings\/Security/i.test(page.url()))
-        await page.goto('https://chatgpt.com/#settings/Security');
-    const authenticatorToggle = await Utility.waitForFunction(() => first(page, [
-        "//button[@data-testid='mfa-authenticator-toggle' and @role='switch']",
-        "//button[@aria-label='Multi-factor authentication']",
-        "//button[@role='switch' and contains(translate(@aria-label, 'AUTHENTICATOR', 'authenticator'), 'authenticator')]",
-        "//*[normalize-space(.)='Authenticator app']/ancestor::*[.//button[@role='switch']][1]//button[@role='switch']"
-    ]), { timeout: 30_000 });
+    const authenticatorToggle = await Utility.waitForFunction(async () => {
+        await dismissYoureAllSetIfPresent(page);
+        if (await youreAllSetOpen(page)) return null;
+        return first(page, [
+            "//button[@data-testid='mfa-authenticator-toggle' and @role='switch']",
+            "//button[@aria-label='Multi-factor authentication']",
+            "//button[@role='switch' and contains(translate(@aria-label, 'AUTHENTICATOR', 'authenticator'), 'authenticator')]",
+            "//*[normalize-space(.)='Authenticator app']/ancestor::*[.//button[@role='switch']][1]//button[@role='switch']"
+        ]);
+    }, { timeout: 60_000 });
     await evidence(page, 'mfa-security-settings');
     if (await first(page, MFA_ENABLED_SELECTORS))
         throw new Error('ChatGPT 验证器 MFA 已启用，无法重新读取现有 OTP 密钥；已保留当前 MFA 设置');
-    await authenticatorToggle.click();
+    await authenticatorToggle.evaluate(el => (el as HTMLElement).click());
     const troubleScanning = await Utility.waitForFunction(() => first(page, [
         "//*[self::button or self::span or self::a][contains(normalize-space(.), 'Trouble scanning?')]",
         "//*[self::button or self::a][contains(normalize-space(.), 'setup key') or contains(normalize-space(.), 'Setup key')]"

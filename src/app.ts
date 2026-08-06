@@ -82,10 +82,24 @@ async function first(page: Page, selectors: string[]): Promise<ElementHandle<Ele
 async function clickContinue(page: Page): Promise<void> {
     const button = await first(page, [
         "//button[normalize-space(.)='Continue' and not(.//*[contains(translate(normalize-space(.), 'GOOGLE', 'google'), 'google')])]",
+        "//button[normalize-space(.)='Finish creating account' and not(@disabled)]",
+        "//button[@data-dd-action-name='Continue' and not(@disabled)]",
         "//button[@type='submit' and not(@disabled)]"
     ]);
     if (!button) throw new Error('找不到可用的非 OAuth Continue/提交按钮');
-    await button.click();
+    const beforeUrl = page.url();
+    try {
+        // 坐标点击，避免导航销毁上下文时 ElementHandle.click 触发 world 错乱
+        const box = await button.boundingBox();
+        if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+        else await button.evaluate(el => (el as HTMLElement).click());
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const navigatedAway = page.url() !== beforeUrl;
+        if (navigatedAway && /same JavaScript world|Execution context was destroyed|Target closed|detached/i.test(message))
+            return;
+        throw error;
+    }
 }
 
 /** 点击注册入口并等待邮箱弹层；首页慢加载/水合未完成时单次 click 可能无效，故重试。 */
@@ -155,22 +169,29 @@ async function assertNoChromeNavigationFailure(page: Page): Promise<void> {
 
 async function detectState(page: Page): Promise<RegistrationState> {
     const url = page.url();
-    // chrome-error 上继续查选择器会触发 Puppeteer world 错乱，先短路。
-    if (/^chrome-error:\/\//i.test(url)) return 'unknown';
-    // 注册弹层仍可能停在 chatgpt.com，且页面上有 textarea/contenteditable；有邮箱输入框时不算已登录。
-    if (/chatgpt\.com\/(?:\?|$)|chatgpt\.com\/(?:c|g|share)\//i.test(url) && !/auth|login|signup|verify/i.test(url)
-        && !await first(page, SIGNUP_EMAIL_SELECTORS)
-        && await first(page, [
-            "//textarea[@id='prompt-textarea' or contains(@placeholder, 'Ask') or contains(@placeholder, 'Message')]",
-            "//*[@contenteditable='true' and (@id='prompt-textarea' or contains(@data-testid, 'composer') or contains(@placeholder, 'Ask') or contains(@placeholder, 'Message'))]",
-            "//button[contains(@aria-label, 'profile') or contains(@data-testid, 'profile')]"
-        ])) return 'authenticated';
-    if (await first(page, ["//input[@type='password' and not(@disabled)]"])) return 'password';
-    if (/\/about-you(?:[/?#]|$)/i.test(url) || await first(page, ["//input[@placeholder='Full name' or @name='name']", "//input[@name='age' or @name='birthday']", "//*[@data-type='month']"])) return 'profile';
-    if (/\/mfa-challenge(?:[/?#]|$)/i.test(url) || await first(page, MFA_CHALLENGE_SELECTORS)) return 'mfa-challenge';
-    if (await first(page, ["//input[@name='code' or @autocomplete='one-time-code' or @inputmode='numeric']"])) return 'code';
-    if (/email-verification/i.test(url) || await first(page, ["//*[contains(translate(normalize-space(.), 'VERIFY YOUR EMAILCHECK YOUR EMAIL', 'verify your emailcheck your email'), 'verify your email') or contains(translate(normalize-space(.), 'VERIFY YOUR EMAILCHECK YOUR EMAIL', 'verify your emailcheck your email'), 'check your email')]"])) return 'email-verification';
-    return 'unknown';
+    // chrome-error / 导航中的 about:blank 上继续查选择器会触发 Puppeteer world 错乱，先短路。
+    if (/^chrome-error:\/\//i.test(url) || /^about:blank$/i.test(url)) return 'unknown';
+    try {
+        // 注册弹层仍可能停在 chatgpt.com，且页面上有 textarea/contenteditable；有邮箱输入框时不算已登录。
+        if (/chatgpt\.com\/(?:\?|$)|chatgpt\.com\/(?:c|g|share)\//i.test(url) && !/auth|login|signup|verify/i.test(url)
+            && !await first(page, SIGNUP_EMAIL_SELECTORS)
+            && await first(page, [
+                "//textarea[@id='prompt-textarea' or @name='prompt-textarea' or contains(@placeholder, 'Ask') or contains(@placeholder, 'Message')]",
+                "//*[@contenteditable='true' and (@id='prompt-textarea' or contains(@data-testid, 'composer') or contains(@placeholder, 'Ask') or contains(@placeholder, 'Message'))]",
+                "//button[contains(@aria-label, 'profile') or contains(@data-testid, 'profile')]"
+            ])) return 'authenticated';
+        if (await first(page, ["//input[@type='password' and not(@disabled)]"])) return 'password';
+        if (/\/about-you(?:[/?#]|$)/i.test(url) || await first(page, ["//input[@placeholder='Full name' or @name='name']", "//input[@name='age' or @name='birthday']", "//*[@data-type='month']"])) return 'profile';
+        if (/\/mfa-challenge(?:[/?#]|$)/i.test(url) || await first(page, MFA_CHALLENGE_SELECTORS)) return 'mfa-challenge';
+        if (await first(page, ["//input[@name='code' or @autocomplete='one-time-code' or @inputmode='numeric']"])) return 'code';
+        if (/email-verification/i.test(url) || await first(page, ["//*[contains(translate(normalize-space(.), 'VERIFY YOUR EMAILCHECK YOUR EMAIL', 'verify your emailcheck your email'), 'verify your email') or contains(translate(normalize-space(.), 'VERIFY YOUR EMAILCHECK YOUR EMAIL', 'verify your emailcheck your email'), 'check your email')]"])) return 'email-verification';
+        return 'unknown';
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/same JavaScript world|Execution context was destroyed|Target closed|detached/i.test(message))
+            return 'unknown';
+        throw error;
+    }
 }
 
 async function waitForState(page: Page, expected: RegistrationState[], timeoutMs = 60_000): Promise<RegistrationState> {

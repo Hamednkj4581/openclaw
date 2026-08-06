@@ -110,6 +110,7 @@ async function openSignup(page: Page): Promise<void> {
 
     const deadline = Date.now() + 60_000;
     let lastError = '';
+    let triedAuthApi = false;
     while (Date.now() < deadline) {
         // 代理隧道失败时页面停在 chrome-error，继续找 Sign up 只会空转至超时
         await assertNoChromeNavigationFailure(page);
@@ -118,6 +119,17 @@ async function openSignup(page: Page): Promise<void> {
         const button = await first(page, SIGNUP_SELECTORS);
         if (!button) {
             lastError = '未找到 Sign up 按钮';
+            // 首页按钮偶发不可点/点了无请求时，走 NextAuth 直达注册页
+            if (!triedAuthApi && Date.now() + 15_000 >= deadline) {
+                triedAuthApi = true;
+                try {
+                    await startSignupViaAuthApi(page);
+                    lastError = 'Auth API 已跳转，但邮箱输入框未出现';
+                } catch (error) {
+                    lastError = error instanceof Error ? error.message : String(error);
+                }
+                continue;
+            }
             await Utility.waitForSeconds(0.5);
             continue;
         }
@@ -125,9 +137,9 @@ async function openSignup(page: Page): Promise<void> {
         try {
             await button.evaluate(el => el.scrollIntoView({ block: 'center', inline: 'center' }));
             const box = await button.boundingBox();
-            // 优先坐标点击，避免 React 水合后 ElementHandle.click 偶发不触发
+            // 坐标点击 + DOM click：证据显示仅坐标时偶发无 auth 请求
             if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-            else await button.click();
+            await button.evaluate(el => (el as HTMLElement).click());
         } catch (error) {
             lastError = error instanceof Error ? error.message : String(error);
             await Utility.waitForSeconds(0.5);
@@ -140,11 +152,54 @@ async function openSignup(page: Page): Promise<void> {
         ).catch(() => null);
         if (opened) return;
         lastError = '已点击 Sign up，但邮箱输入框未出现';
+
+        // 多次点击仍停在 chatgpt.com 且无邮箱框：改走 Auth API（避免空转至超时）
+        if (!triedAuthApi && /chatgpt\.com/i.test(page.url()) && !/auth|login|signup/i.test(page.url())) {
+            triedAuthApi = true;
+            try {
+                await startSignupViaAuthApi(page);
+                lastError = 'Auth API 已跳转，但邮箱输入框未出现';
+            } catch (error) {
+                lastError = error instanceof Error ? error.message : String(error);
+            }
+        }
     }
 
     await assertNoChromeNavigationFailure(page);
     const title = await page.title().catch(() => '');
     throw new Error(`打开 ChatGPT 注册入口超时（${lastError || '未知'}），URL：${page.url().replace(/[?#].*$/, '')}，标题：${title}`);
+}
+
+/** 首页 Sign up 点击无响应时，用 NextAuth csrf+signin 直达注册授权页 */
+async function startSignupViaAuthApi(page: Page): Promise<void> {
+    logger.info('Sign up 点击未打开邮箱框，改走 /api/auth/signin/openai 直达注册');
+    const authUrl = await page.evaluate(async () => {
+        const csrfRes = await fetch('/api/auth/csrf', { credentials: 'include' });
+        if (!csrfRes.ok) throw new Error(`csrf HTTP ${csrfRes.status}`);
+        const csrfJson = await csrfRes.json() as { csrfToken?: unknown };
+        const csrfToken = typeof csrfJson.csrfToken === 'string' ? csrfJson.csrfToken : '';
+        if (!csrfToken) throw new Error('csrfToken 缺失');
+
+        const body = new URLSearchParams({
+            csrfToken,
+            callbackUrl: 'https://chatgpt.com/',
+            json: 'true',
+        });
+        const signinRes = await fetch('/api/auth/signin/openai', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body,
+        });
+        if (!signinRes.ok) throw new Error(`signin HTTP ${signinRes.status}`);
+        const signinJson = await signinRes.json() as { url?: unknown };
+        if (typeof signinJson.url !== 'string' || !signinJson.url)
+            throw new Error('signin 未返回 url');
+        const url = new URL(signinJson.url);
+        url.searchParams.set('screen_hint', 'signup');
+        return url.toString();
+    });
+    await page.goto(authUrl);
 }
 
 /** 识别 chrome-error 导航失败，避免误判为 unknown / 被 Protocol error 掩盖。 */

@@ -14,7 +14,6 @@ import requests
 TOKEN_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
 IMAP_HOST = "outlook.live.com"
 MAILBOXES = ("INBOX", "Junk")
-MAX_EMAILS_PER_MAILBOX = 30
 SHANGHAI_TIMEZONE = ZoneInfo("Asia/Shanghai")
 MAIL_PREVIEW_DIR = Path("mail_previews")
 
@@ -171,19 +170,31 @@ def build_mail_preview_html(body_html, message, mailbox):
     )
 
 
-def save_mail_preview_html(date_header, html_content):
-    """按邮件时间将 HTML 保存到 mail_previews，同秒冲突时追加序号。"""
-    MAIL_PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
+def sanitize_recipient_folder(recipient):
+    """从收件人字段提取可用作目录名的邮箱或安全字符串。"""
+    if not recipient:
+        return "unknown_recipient"
+
+    match = re.search(r"[\w.+-]+@[\w.-]+\.\w+", recipient)
+    name = match.group(0) if match else recipient
+    name = re.sub(r'[<>:"/\\|?*\s]+', "_", name).strip("._")
+    return (name or "unknown_recipient")[:120]
+
+
+def save_mail_preview_html(date_header, html_content, recipient):
+    """按收件人建子目录，再按邮件时间保存 HTML；同秒冲突时追加序号。"""
+    folder = MAIL_PREVIEW_DIR / sanitize_recipient_folder(recipient)
+    folder.mkdir(parents=True, exist_ok=True)
     mail_time = parse_mail_datetime(date_header)
     if mail_time is None:
         stem = "unknown_time"
     else:
         stem = mail_time.astimezone(SHANGHAI_TIMEZONE).strftime("%Y-%m-%d_%H-%M-%S")
 
-    path = MAIL_PREVIEW_DIR / f"{stem}.html"
+    path = folder / f"{stem}.html"
     suffix = 2
     while path.exists():
-        path = MAIL_PREVIEW_DIR / f"{stem}_{suffix}.html"
+        path = folder / f"{stem}_{suffix}.html"
         suffix += 1
 
     path.write_text(html_content, encoding="utf-8")
@@ -228,7 +239,8 @@ def format_mail_time(date_header):
     return shanghai_time.strftime("%Y-%m-%d %H:%M:%S (Asia/Shanghai)")
 
 
-def get_chatgpt_verifications(email_user, access_token):
+def list_all_emails(email_user, access_token):
+    """拉取收件箱与垃圾箱全部邮件，按收件人保存预览并返回列表。"""
     results = []
     seen_messages = set()
     mail = imaplib.IMAP4_SSL(IMAP_HOST)
@@ -247,7 +259,7 @@ def get_chatgpt_verifications(email_user, access_token):
             if status != "OK" or not data or not data[0]:
                 continue
 
-            mail_ids = data[0].split()[-MAX_EMAILS_PER_MAILBOX:]
+            mail_ids = data[0].split()
             for mail_id in reversed(mail_ids):
                 status, message_data = mail.fetch(mail_id, "(RFC822)")
                 if status != "OK" or not message_data:
@@ -272,31 +284,34 @@ def get_chatgpt_verifications(email_user, access_token):
 
                 subject = decode_mime_header(message.get("Subject"))
                 sender = decode_mime_header(message.get("From"))
-                if not re.search(r"(?:openai|chatgpt)", f"{subject} {sender}", re.I):
-                    continue
+                recipient = decode_mime_header(message.get("To"))
+                date_header = message.get("Date")
+                parsed_date = parse_mail_datetime(date_header)
+                body_text = get_message_text(message)
+                code = extract_verification_code(subject, body_text)
 
-                code = extract_verification_code(subject, get_message_text(message))
-                if code:
-                    date_header = message.get("Date")
-                    parsed_date = parse_mail_datetime(date_header)
-                    preview_path = None
-                    html_content = get_message_html(message)
-                    if html_content:
-                        preview_html = build_mail_preview_html(
-                            html_content, message, mailbox
-                        )
-                        preview_path = save_mail_preview_html(
-                            date_header, preview_html
-                        )
-                    results.append(
-                        {
-                            "code": code,
-                            "mail_time": format_mail_time(date_header),
-                            "date": parsed_date,
-                            "recipient": decode_mime_header(message.get("To")),
-                            "preview_path": preview_path,
-                        }
+                preview_path = None
+                html_content = get_message_html(message)
+                if html_content:
+                    preview_html = build_mail_preview_html(
+                        html_content, message, mailbox
                     )
+                    preview_path = save_mail_preview_html(
+                        date_header, preview_html, recipient
+                    )
+
+                results.append(
+                    {
+                        "subject": subject or "(无主题)",
+                        "sender": sender or "未知发件人",
+                        "code": code,
+                        "mail_time": format_mail_time(date_header),
+                        "date": parsed_date,
+                        "mailbox": mailbox,
+                        "recipient": recipient or "未知收件人",
+                        "preview_path": preview_path,
+                    }
+                )
     finally:
         try:
             mail.logout()
@@ -319,22 +334,25 @@ def main():
             account_info
         )
         access_token = get_access_token(client_id, refresh_token)
-        verifications = get_chatgpt_verifications(email_user, access_token)
+        emails = list_all_emails(email_user, access_token)
     except (ValueError, RuntimeError, imaplib.IMAP4.error, OSError) as exc:
         print(f"获取失败：{exc}")
         return
 
-    if not verifications:
-        print("未在最近的收件箱或垃圾邮件中找到 ChatGPT 验证码邮件。")
+    if not emails:
+        print("收件箱和垃圾邮件中没有邮件。")
         return
 
-    for item in verifications:
+    print(f"共 {len(emails)} 封邮件，预览已按收件人保存到 {MAIL_PREVIEW_DIR}/")
+    for index, item in enumerate(emails, start=1):
         preview = item.get("preview_path")
         preview_text = f"  预览：{preview}" if preview else ""
-        recipient = item.get("recipient") or "未知收件人"
+        code = item.get("code")
+        code_text = f"  验证码：{code}" if code else ""
         print(
-            f"验证码：{item['code']}  收件人：{recipient}  "
-            f"邮件时间：{item['mail_time']}{preview_text}"
+            f"[{index}] 主题：{item['subject']}  发件人：{item['sender']}  "
+            f"收件人：{item['recipient']}  位置：{item['mailbox']}  "
+            f"时间：{item['mail_time']}{code_text}{preview_text}"
         )
 
 

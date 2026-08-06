@@ -568,7 +568,13 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
             // 抓取全程 URL 写入 evidence，供分析哪些主机/资源不必走住宅代理
             networkCapture = installNetworkCapture(page, redactText);
             await installTurnstileHook(page);
-            await page.goto('https://chatgpt.com/');
+            await page.goto('https://chatgpt.com/', {
+                // 首页资源多，load 易触达 30s；domcontentloaded 即可继续点 Sign up
+                waitUntil: 'domcontentloaded',
+                timeout: 60_000,
+                // 默认 5 次重试会空耗约 150s，挤掉后续导出 session 的时间
+                retries: 2,
+            });
             // patches 的 goto 耗尽重试后可能静默停在 chrome-error / about:blank，需主动识别并换出口
             const navError = await chromeNavigationFailure(page)
                 ?? (!/chatgpt\.com/i.test(page.url())

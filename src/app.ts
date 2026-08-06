@@ -20,6 +20,8 @@ const EVIDENCE_TIMEOUT_MS = 15_000;
 const VERIFICATION_EMAIL_TIMEOUT_MS = 30_000;
 /** 浏览器打开 chatgpt.com 仍隧道失败时，换 sticky session 重开的次数 */
 const MAX_OPEN_CHATGPT_ATTEMPTS = 3;
+/** 打开注册入口失败时，关闭 page 再开首页的最大重试次数（不含首次） */
+const MAX_SIGNUP_PAGE_RETRIES = 3;
 type RegistrationState = 'password' | 'email-verification' | 'code' | 'profile' | 'authenticated' | 'mfa-challenge' | 'unknown';
 const sensitiveValues = new Set<string>();
 
@@ -104,27 +106,12 @@ async function clickContinue(page: Page): Promise<void> {
     }
 }
 
-/** 等待注册/登录页出现可见邮箱框（代理下 goto 超时不代表页面没出来）。 */
-async function waitForSignupEmail(page: Page, timeoutMs: number): Promise<boolean> {
-    const found = await Utility.waitForFunction(
-        async () => {
-            await assertNoChromeNavigationFailure(page);
-            // 打开过程中可能出现 Turnstile，需边等边解，否则邮箱框一直不渲染
-            await solveCloudflareIfPresent(page, 1);
-            return first(page, SIGNUP_EMAIL_SELECTORS);
-        },
-        { pollInterval: 400, timeout: timeoutMs }
-    ).catch(() => null);
-    return !!found;
-}
-
-/** 点击注册入口并等待邮箱弹层；首页慢加载/水合未完成时单次 click 可能无效，故重试。 */
+/** 点击首页 Sign up 并等待邮箱框；失败由外层重开 page，不再走 Auth URL 兜底。 */
 async function openSignup(page: Page): Promise<void> {
     if (await first(page, SIGNUP_EMAIL_SELECTORS)) return;
 
     const deadline = Date.now() + 60_000;
     let lastError = '';
-    let triedAuthApi = false;
     while (Date.now() < deadline) {
         // 代理隧道失败时页面停在 chrome-error，继续找 Sign up 只会空转至超时
         await assertNoChromeNavigationFailure(page);
@@ -134,19 +121,6 @@ async function openSignup(page: Page): Promise<void> {
         const button = await first(page, SIGNUP_SELECTORS);
         if (!button) {
             lastError = '未找到 Sign up 按钮';
-            // 首页按钮偶发不可点/点了无请求时，走 NextAuth 直达注册页
-            if (!triedAuthApi && Date.now() + 15_000 >= deadline) {
-                triedAuthApi = true;
-                try {
-                    await startSignupViaAuthApi(page);
-                    // goto 在慢代理上常超时，但页面可能已落到带邮箱框的登录页
-                    if (await waitForSignupEmail(page, 45_000)) return;
-                    lastError = 'Auth API 已跳转，但邮箱输入框未出现';
-                } catch (error) {
-                    lastError = error instanceof Error ? error.message : String(error);
-                }
-                continue;
-            }
             await Utility.waitForSeconds(0.5);
             continue;
         }
@@ -164,80 +138,45 @@ async function openSignup(page: Page): Promise<void> {
         }
 
         const opened = await Utility.waitForFunction(
-            () => first(page, SIGNUP_EMAIL_SELECTORS),
+            async () => {
+                await solveCloudflareIfPresent(page, 1);
+                return first(page, SIGNUP_EMAIL_SELECTORS);
+            },
             { pollInterval: 400, timeout: 8_000 }
         ).catch(() => null);
         if (opened) return;
         lastError = '已点击 Sign up，但邮箱输入框未出现';
-
-        // 多次点击仍停在 chatgpt.com 且无邮箱框：改走 Auth API（避免空转至超时）
-        if (!triedAuthApi && /chatgpt\.com/i.test(page.url()) && !/auth|login|signup/i.test(page.url())) {
-            triedAuthApi = true;
-            try {
-                await startSignupViaAuthApi(page);
-                if (await waitForSignupEmail(page, 45_000)) return;
-                lastError = 'Auth API 已跳转，但邮箱输入框未出现';
-            } catch (error) {
-                lastError = error instanceof Error ? error.message : String(error);
-            }
-        }
     }
-
-    // 截止后仍再等一轮：patches.goto 超时重试会中断加载，最终页却常已带邮箱框
-    if (await waitForSignupEmail(page, 20_000)) return;
 
     await assertNoChromeNavigationFailure(page);
     const title = await page.title().catch(() => '');
     throw new Error(`打开 ChatGPT 注册入口超时（${lastError || '未知'}），URL：${page.url().replace(/[?#].*$/, '')}，标题：${title}`);
 }
 
-/** 首页 Sign up 点击无响应时，用 NextAuth 或 /auth/login 直达注册页 */
-async function startSignupViaAuthApi(page: Page): Promise<void> {
-    logger.info('Sign up 点击未打开邮箱框，改走注册入口兜底');
-    const gotoOpts = {
-        // 慢代理上 domcontentloaded 常超 45s；多轮 retries 会取消已在加载的文档
+/** 在已有浏览器中新建 page 并打开 chatgpt 首页（供注册入口失败后重试）。 */
+async function reopenChatGptPage(
+    browser: Browser,
+    oldPage: Page,
+    proxy: { username: string; password: string },
+    redactText: (text: string) => string,
+): Promise<{ page: Page; networkCapture: ReturnType<typeof installNetworkCapture> }> {
+    await oldPage.close().catch(() => undefined);
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1920, height: 1080 });
+    await page.authenticate({ username: proxy.username, password: proxy.password });
+    const networkCapture = installNetworkCapture(page, redactText);
+    await installTurnstileHook(page);
+    await page.goto('https://chatgpt.com/', {
+        waitUntil: 'domcontentloaded',
         timeout: 60_000,
-        waitUntil: 'domcontentloaded' as const,
-        retries: 1,
-    };
-    try {
-        const authUrl = await Promise.race([
-            page.evaluate(async () => {
-                const csrfRes = await fetch('/api/auth/csrf', { credentials: 'include' });
-                if (!csrfRes.ok) throw new Error(`csrf HTTP ${csrfRes.status}`);
-                const csrfJson = await csrfRes.json() as { csrfToken?: unknown };
-                const csrfToken = typeof csrfJson.csrfToken === 'string' ? csrfJson.csrfToken : '';
-                if (!csrfToken) throw new Error('csrfToken 缺失');
-
-                const body = new URLSearchParams({
-                    csrfToken,
-                    callbackUrl: 'https://chatgpt.com/',
-                    json: 'true',
-                });
-                const signinRes = await fetch('/api/auth/signin/openai', {
-                    method: 'POST',
-                    credentials: 'include',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body,
-                });
-                if (!signinRes.ok) throw new Error(`signin HTTP ${signinRes.status}`);
-                const signinJson = await signinRes.json() as { url?: unknown };
-                if (typeof signinJson.url !== 'string' || !signinJson.url)
-                    throw new Error('signin 未返回 url');
-                const url = new URL(signinJson.url);
-                url.searchParams.set('screen_hint', 'signup');
-                return url.toString();
-            }),
-            new Promise<string>((_, reject) => setTimeout(() => reject(new Error('Auth API 超时')), 20_000)),
-        ]);
-        await page.goto(authUrl, gotoOpts);
-        return;
-    } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        logger.warn('Auth API 直达失败（%s），改打开 /auth/login?screen_hint=signup', message);
-    }
-    // patches.goto 耗尽重试后不抛错；外层靠 waitForSignupEmail 判定是否真正打开
-    await page.goto('https://chatgpt.com/auth/login?screen_hint=signup', gotoOpts);
+        retries: 2,
+    });
+    const navError = await chromeNavigationFailure(page)
+        ?? (!/chatgpt\.com/i.test(page.url())
+            ? `打开 ChatGPT 失败，当前 URL：${page.url().replace(/[?#].*$/, '') || 'about:blank'}`
+            : null);
+    if (navError) throw new Error(navError);
+    return { page, networkCapture };
 }
 
 /** 识别 chrome-error 导航失败，避免误判为 unknown / 被 Protocol error 掩盖。 */
@@ -617,7 +556,25 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
         await evidence(page, 'chatgpt-opened');
         await solveCloudflareIfPresent(page);
         await evidence(page, 'initial-turnstile-checked');
-        await openSignup(page);
+        for (let retry = 0; ; retry++) {
+            try {
+                await openSignup(page);
+                break;
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                if (retry >= MAX_SIGNUP_PAGE_RETRIES) throw error;
+                logger.warn('打开注册入口失败（重试 %s/%s），关闭 page 并重新打开首页：%s',
+                    retry + 1, MAX_SIGNUP_PAGE_RETRIES, message);
+                networkCapture?.flush();
+                networkCapture = undefined;
+                const reopened = await reopenChatGptPage(chrome!, page, proxy, redactText);
+                page = reopened.page;
+                networkCapture = reopened.networkCapture;
+                await evidence(page, `chatgpt-reopened-${retry + 1}`);
+                await solveCloudflareIfPresent(page);
+                await evidence(page, `reopen-turnstile-checked-${retry + 1}`);
+            }
+        }
         await evidence(page, 'signup-opened');
         await solveCloudflareIfPresent(page);
         await page.type(SIGNUP_EMAIL_SELECTORS[0], email, { timeout: 60_000 });

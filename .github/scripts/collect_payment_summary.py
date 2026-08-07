@@ -92,6 +92,9 @@ def safe_zip_folder_name(name: str) -> str:
 
 def pack_sessions_and_cookies(summaries_dir: Path, zip_path: Path) -> int:
     """把各账号的 session.json 与邮箱命名 cookie 打进同一个 zip。"""
+    if not summaries_dir.is_dir():
+        return 0
+
     entries = 0
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for account_dir in sorted(path for path in summaries_dir.iterdir() if path.is_dir()):

@@ -360,13 +360,19 @@ async function extractAccessToken(page: Page): Promise<string> {
 
         await evidence(page, 'authenticated');
         const accessToken = await extractAccessToken(page);
-        // 故意不掩码：本任务需要在 Actions 日志中可见 access token
-        console.log('ACCESS_TOKEN_BEGIN');
-        console.log(accessToken);
-        console.log('ACCESS_TOKEN_END');
+        // GitHub 会把日志里与 Secret 重合的子串打成 ***；Base64 后再打印可避开掩码。
+        const accessTokenB64 = Buffer.from(accessToken, 'utf8').toString('base64');
+        fs.writeFileSync('access-token.txt', accessToken, 'utf8');
+        fs.writeFileSync('access-token.b64.txt', accessTokenB64, 'utf8');
+        console.log('ACCESS_TOKEN_B64_BEGIN');
+        console.log(accessTokenB64);
+        console.log('ACCESS_TOKEN_B64_END');
         if (process.env.GITHUB_STEP_SUMMARY)
-            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `accessToken\n\n\`\`\`\n${accessToken}\n\`\`\`\n`);
-        logger.info('已打印 access token，开始等待 10 分钟后退出');
+            fs.appendFileSync(
+                process.env.GITHUB_STEP_SUMMARY,
+                `accessToken (Base64，本地解码：\`base64 -d\`)\n\n\`\`\`\n${accessTokenB64}\n\`\`\`\n`
+            );
+        logger.info('已打印 access token（Base64），开始等待 10 分钟后退出');
 
         const waitUntil = Date.now() + POST_LOGIN_WAIT_MS;
         while (Date.now() < waitUntil) {

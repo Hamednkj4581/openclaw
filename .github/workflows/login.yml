@@ -108,6 +108,17 @@ jobs:
           # 登录 + 打印 token + 等待 10 分钟，预留缓冲
           timeout -k 30s 900s node dist/login.js
 
+      - name: 上传 access token 产物
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: access-token-${{ matrix.account_index }}
+          path: |
+            access-token.txt
+            access-token.b64.txt
+          if-no-files-found: warn
+          retention-days: 1
+
       - name: 上传登录过程证据
         if: always() && hashFiles('evidence/**') != ''
         uses: actions/upload-artifact@v4

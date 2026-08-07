@@ -9,7 +9,16 @@ export const SIGNUP_SELECTORS = [
     "//a[contains(@href, 'signup') and not(@aria-disabled='true')]"
 ];
 
-/** 注册弹层邮箱框：出现即表示 Sign up 已打开 */
+/** 首页 Log in 入口（与 Sign up 对称） */
+export const LOGIN_SELECTORS = [
+    "//button[@data-testid='login-button' and not(@disabled)]",
+    "//button[contains(@class,'wm-app-loginButton') and not(@disabled)]",
+    "//button[@data-mobile-auth-entry-action='login' and not(@disabled)]",
+    "//button[normalize-space(string(.))='Log in']",
+    "//a[contains(@href, 'login') or contains(@href, 'signin')][not(@aria-disabled='true')]"
+];
+
+/** 注册/登录弹层邮箱框 */
 export const SIGNUP_EMAIL_SELECTORS = [
     "//input[@id='email' or @name='email' or @type='email']"
 ];

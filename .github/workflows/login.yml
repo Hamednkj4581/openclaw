@@ -1,0 +1,112 @@
+name: ChatGPT login
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_message:
+        description: '用于 run-name 的提交主题（非敏感）'
+        required: true
+        type: string
+      account:
+        description: 'ChatGPT 账号：email----password----2fa（TOTP 密钥）'
+        required: true
+        type: string
+      enable_711_proxy:
+        description: '启用 711Proxy 日本住宅代理（关闭则直连）'
+        required: false
+        default: false
+        type: boolean
+
+# workflow_dispatch 无 head_commit，用显式输入作为运行名
+run-name: ${{ inputs.commit_message }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: write
+
+env:
+  TZ: Asia/Shanghai
+
+jobs:
+  login:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 读取并保护登录凭据
+        shell: python
+        env:
+          ACCOUNT: ${{ inputs.account }}
+        run: |
+          import os
+          import re
+
+          raw = os.environ['ACCOUNT'].strip()
+          fields = [part.strip() for part in re.split(r'-{4,}', raw) if part.strip()]
+          if len(fields) < 3:
+              raise SystemExit('登录账号格式应为 email----password----2fa')
+          email, password, otp = fields[0], fields[1], fields[2]
+          if '@' not in email:
+              raise SystemExit('登录邮箱格式无效')
+
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env_file:
+              for name, value in (
+                  ('CHATGPT_LOGIN_EMAIL', email),
+                  ('CHATGPT_LOGIN_PASSWORD', password),
+                  ('CHATGPT_LOGIN_OTP', otp),
+              ):
+                  print(f'::add-mask::{value}')
+                  env_file.write(f'{name}<<__LOGIN_VALUE__\n{value}\n__LOGIN_VALUE__\n')
+              # 拼回完整输入供 node 解析；整行也掩码，避免日志回显密码/2FA
+              login_line = f'{email}----{password}----{otp}'
+              print(f'::add-mask::{login_line}')
+              env_file.write(f'CHATGPT_LOGIN<<__LOGIN_VALUE__\n{login_line}\n__LOGIN_VALUE__\n')
+
+      - name: 构建并执行 ChatGPT 登录
+        env:
+          ENABLE_711_PROXY: ${{ inputs.enable_711_proxy }}
+          CAPSOLVER_API_KEY: ${{ secrets.CAPSOLVER_API_KEY }}
+          PROXY_USERNAME: ${{ secrets.PROXY_USERNAME }}
+          PROXY_PASSWORD: ${{ secrets.PROXY_PASSWORD }}
+          PROXY_HOST: us.rotgb.711proxy.com
+          PROXY_PORT: '10000'
+          PROXY_REGION: JP
+          PROXY_SESS_TIME: '30'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk
+          npm install
+          npm run build:login
+          # 登录 + 打印 token + 等待 10 分钟，预留缓冲
+          timeout -k 30s 900s node dist/login.js
+
+      - name: 上传登录过程证据
+        if: always() && hashFiles('evidence/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: login-evidence
+          path: evidence/
+          retention-days: 3
+
+      - name: 尝试删除本次 run（清除日志中的 access token）
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          code=$(curl -sS -o /tmp/delete-run-body.txt -w '%{http_code}' -X DELETE \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}")
+          echo "delete_http_status=${code}"
+          if [ "${code}" = "204" ]; then
+            echo "已请求删除本次 workflow run"
+          else
+            echo "无法自动删除本次 run，请手动删除。响应："
+            cat /tmp/delete-run-body.txt || true
+          fi

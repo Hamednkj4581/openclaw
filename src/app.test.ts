@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { MFA_CHALLENGE_SELECTORS, MFA_CODE_SELECTORS, MFA_ENABLED_SELECTORS, MFA_VERIFY_SELECTORS, SIGNUP_EMAIL_SELECTORS, SIGNUP_SELECTORS } from './selectors.js';
+import { LOGIN_SELECTORS, MFA_CHALLENGE_SELECTORS, MFA_CODE_SELECTORS, MFA_ENABLED_SELECTORS, MFA_VERIFY_SELECTORS, SIGNUP_EMAIL_SELECTORS, SIGNUP_SELECTORS } from './selectors.js';
 
 test('signup selectors support the current anonymous ChatGPT home page', () => {
     assert.ok(SIGNUP_SELECTORS.some(selector => selector.includes("data-testid='signup-button'")));
@@ -8,6 +8,13 @@ test('signup selectors support the current anonymous ChatGPT home page', () => {
     assert.ok(SIGNUP_SELECTORS.some(selector => selector.includes("data-mobile-auth-entry-action='signup'")));
     assert.ok(SIGNUP_SELECTORS.some(selector => selector.includes('Sign up for free')));
     assert.ok(SIGNUP_EMAIL_SELECTORS.some(selector => selector.includes("@id='email'")));
+});
+
+test('login selectors support the current anonymous ChatGPT home page', () => {
+    assert.ok(LOGIN_SELECTORS.some(selector => selector.includes("data-testid='login-button'")));
+    assert.ok(LOGIN_SELECTORS.some(selector => selector.includes("wm-app-loginButton")));
+    assert.ok(LOGIN_SELECTORS.some(selector => selector.includes("data-mobile-auth-entry-action='login'")));
+    assert.ok(LOGIN_SELECTORS.some(selector => selector.includes("Log in")));
 });
 
 test('MFA selectors support the current authenticator dialog', () => {

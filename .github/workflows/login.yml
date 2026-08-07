@@ -16,6 +16,16 @@ on:
         required: false
         default: false
         type: boolean
+      hold_minutes:
+        description: '登录成功后保持分钟数（先回传 token，再等待关闭）'
+        required: false
+        default: '5'
+        type: choice
+        options:
+          - '5'
+          - '10'
+          - '15'
+          - '30'
       web_task_id:
         description: '网页控制台任务 ID（有值时回传进度与 access token）'
         required: false
@@ -113,6 +123,11 @@ jobs:
         id: login-run
         env:
           ENABLE_711_PROXY: ${{ inputs.enable_711_proxy }}
+          LOGIN_HOLD_MINUTES: ${{ inputs.hold_minutes }}
+          WEB_TASK_ID: ${{ inputs.web_task_id }}
+          WEB_CALLBACK_URL: ${{ secrets.WEB_CALLBACK_URL }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+          WEB_ACCOUNT_INDEX: ${{ matrix.account_index }}
           CAPSOLVER_API_KEY: ${{ secrets.CAPSOLVER_API_KEY }}
           PROXY_USERNAME: ${{ secrets.PROXY_USERNAME }}
           PROXY_PASSWORD: ${{ secrets.PROXY_PASSWORD }}
@@ -125,11 +140,12 @@ jobs:
           sudo apt-get install -y fonts-noto-cjk
           npm install
           npm run build:login
-          # 登录 + 打印 token + 等待 10 分钟，预留缓冲
-          timeout -k 30s 900s node dist/login.js
+          # 登录耗时缓冲 10 分钟 + 保持时长
+          hold="${{ inputs.hold_minutes }}"
+          timeout -k 30s "$(( (hold + 10) * 60 ))s" node dist/login.js
 
-      - name: 通知网页控制台账号结果
-        if: ${{ always() && inputs.web_task_id != '' }}
+      - name: 通知网页控制台账号失败
+        if: ${{ failure() && inputs.web_task_id != '' }}
         continue-on-error: true
         env:
           WEB_TASK_ID: ${{ inputs.web_task_id }}
@@ -138,7 +154,7 @@ jobs:
           WEB_EVENT: account_done
           WEB_ACCOUNT_INDEX: ${{ matrix.account_index }}
           WEB_ACCOUNT_EMAIL: ${{ env.LOGIN_EMAIL }}
-          WEB_ACCOUNT_OK: ${{ steps.login-run.outcome == 'success' }}
+          WEB_ACCOUNT_OK: 'false'
           WEB_ACCOUNT_ERROR: 登录失败
         run: python .github/scripts/web_callback.py
 

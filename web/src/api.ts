@@ -7,6 +7,7 @@ export interface TriggerPayload {
   enable_mfa?: boolean;
   enable_711_proxy?: boolean;
   payment_link_type?: string;
+  hold_minutes?: number;
 }
 
 export interface AccountStatus {
@@ -15,6 +16,7 @@ export interface AccountStatus {
   ok: boolean | null;
   accessToken?: string;
   error?: string;
+  holdUntil?: number;
 }
 
 export interface TaskStatus {

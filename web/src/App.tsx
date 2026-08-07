@@ -28,6 +28,13 @@ const PROXY_REGION_OPTIONS = [
   { value: 'JP', label: '日本' },
 ];
 
+const HOLD_MINUTES_OPTIONS = [
+  { value: 5, label: '5 分钟' },
+  { value: 10, label: '10 分钟' },
+  { value: 15, label: '15 分钟' },
+  { value: 30, label: '30 分钟' },
+];
+
 interface RegisterForm {
   accounts: string;
   forwarding_emails: string;
@@ -39,10 +46,39 @@ interface RegisterForm {
 interface LoginForm {
   accounts: string;
   proxy_region: string;
+  hold_minutes: number;
 }
 
 function isProxyEnabled(region: string | undefined): boolean {
   return Boolean(region && region !== 'none');
+}
+
+function formatRemain(ms: number): string {
+  const totalSec = Math.max(0, Math.ceil(ms / 1000));
+  const minutes = Math.floor(totalSec / 60);
+  const seconds = totalSec % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function useHoldCountdown(holdUntil?: number): string | null {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!holdUntil || holdUntil <= Date.now()) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [holdUntil]);
+
+  if (!holdUntil) return null;
+  const remain = holdUntil - now;
+  if (remain <= 0) return null;
+  return formatRemain(remain);
+}
+
+function AccountHoldCountdown({ holdUntil }: { holdUntil?: number }) {
+  const label = useHoldCountdown(holdUntil);
+  if (!label) return null;
+  return <div className="hold-countdown">保持中，剩余 {label}</div>;
 }
 
 const phasePercent: Record<TaskStatus['phase'], number> = {
@@ -123,6 +159,7 @@ export default function App() {
         mode: 'login',
         accounts: values.accounts,
         enable_711_proxy: isProxyEnabled(values.proxy_region),
+        hold_minutes: Number(values.hold_minutes) || 5,
       });
       setTaskId(result.taskId);
       setStatus(null);
@@ -216,7 +253,7 @@ export default function App() {
             form={loginForm}
             layout="vertical"
             className="task-form"
-            initialValues={{ proxy_region: 'none' }}
+            initialValues={{ proxy_region: 'none', hold_minutes: 5 }}
             onFinish={onSubmitLogin}
           >
             <Form.Item
@@ -227,9 +264,14 @@ export default function App() {
             >
               <TextArea rows={6} placeholder="email----password----2fa" />
             </Form.Item>
-            <Form.Item label="代理地区" name="proxy_region" rules={[{ required: true, message: '请选择代理地区' }]}>
-              <Select style={{ width: 200 }} options={PROXY_REGION_OPTIONS} />
-            </Form.Item>
+            <Space size="large" wrap className="switches">
+              <Form.Item label="代理地区" name="proxy_region" rules={[{ required: true, message: '请选择代理地区' }]}>
+                <Select style={{ width: 200 }} options={PROXY_REGION_OPTIONS} />
+              </Form.Item>
+              <Form.Item label="延迟关闭" name="hold_minutes" rules={[{ required: true, message: '请选择延迟关闭时间' }]}>
+                <Select style={{ width: 140 }} options={HOLD_MINUTES_OPTIONS} />
+              </Form.Item>
+            </Space>
             <Button type="primary" htmlType="submit" icon={<PlayCircleOutlined />} loading={submitting} size="large">
               开始登录
             </Button>
@@ -264,6 +306,7 @@ export default function App() {
                       </Button>
                     </Space.Compact>
                   ) : null}
+                  <AccountHoldCountdown holdUntil={account.holdUntil} />
                 </div>
               ))}
             </div>

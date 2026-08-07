@@ -28,6 +28,7 @@ export function publicStatus(state: TaskState) {
       ok: a.ok,
       accessToken: a.accessToken || undefined,
       error: a.error || undefined,
+      holdUntil: a.holdUntil || undefined,
     })),
     done: state.phase === 'done' || state.phase === 'failed',
     success: state.phase === 'done',

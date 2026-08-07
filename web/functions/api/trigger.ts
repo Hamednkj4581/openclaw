@@ -11,6 +11,7 @@ interface TriggerBody {
   enable_mfa?: boolean;
   enable_711_proxy?: boolean;
   payment_link_type?: string;
+  hold_minutes?: number | string;
 }
 
 function requireEnv(env: Env): string | null {
@@ -61,6 +62,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     inputs.forwarding_emails = (body.forwarding_emails || '').trim();
     inputs.enable_mfa = String(body.enable_mfa !== false);
     inputs.payment_link_type = body.payment_link_type === 'gcash' ? 'gcash' : '未选择';
+  } else {
+    const hold = Number(body.hold_minutes);
+    inputs.hold_minutes = [5, 10, 15, 30].includes(hold) ? String(hold) : '5';
   }
 
   try {

@@ -75,6 +75,12 @@
   width: 100%;
 }
 
+.hold-countdown {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
 @media (max-width: 640px) {
   .page {
     padding-top: 28px;

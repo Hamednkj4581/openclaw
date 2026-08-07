@@ -12,6 +12,7 @@ interface WebhookBody {
     ok?: boolean;
     accessToken?: string;
     error?: string;
+    holdUntil?: number;
   };
   ok?: boolean;
 }
@@ -68,8 +69,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     if (row.ok && body.account?.accessToken) {
       row.accessToken = body.account.accessToken;
       delete row.error;
+      const holdUntil = Number(body.account.holdUntil);
+      if (Number.isFinite(holdUntil) && holdUntil > 0) {
+        row.holdUntil = holdUntil;
+      } else {
+        delete row.holdUntil;
+      }
     } else {
       delete row.accessToken;
+      delete row.holdUntil;
       row.error = (body.account?.error || '处理失败').slice(0, 80);
     }
     if (!state.total) state.total = Math.max(state.accounts.length, index + 1);

@@ -142,6 +142,7 @@ jobs:
           PROXY_SESS_TIME: '30'
           ACCOUNT_RESULT_PATH: step-summary
           ACCOUNT_SESSION_JSON_PATH: session.json
+          ACCOUNT_COOKIE_DIR: cookies
         run: |
           sudo apt-get update
           sudo apt-get install -y fonts-noto-cjk
@@ -157,7 +158,7 @@ jobs:
           path: |
             step-summary
             session.json
-            '*@*.json'
+            cookies/
           if-no-files-found: ignore
           retention-days: 7
 

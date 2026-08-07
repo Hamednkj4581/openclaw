@@ -47,7 +47,7 @@ description: 基于 GitHub Actions 实测结果维护本仓库的 ChatGPT 注册
 - `CAPSOLVER_API_KEY` 只能来自 GitHub Secret。每个账号独立上传结果和完整过程证据。
 - 每次注册生成新 ChatGPT 密码，并在登录成功后从 `/api/auth/session` 提取 accessToken 写入结果；只有启用 MFA 时才写入 OTP 密钥。结果格式：`email----password----accessToken----时间`，启用 MFA 时为 `email----password----otpSecret----accessToken----时间`。
 - 额外导出截图格式的 `session.json`（`user`/`expires`/`account`/`accessToken`/`sessionToken`/`authProvider`）：session 接口字段 + Cookie 中的 `sessionToken`，与文本结果一并上传 Artifact。
-- 注册成功后额外按邮箱导出 Cookie-Editor JSON（如 `user@example.com.json`，对齐 CursorCookie 字段）；汇总阶段将各账号的 `session.json` 与 cookie 打进 `sessions-and-cookies.zip`。
+- 注册成功后额外按邮箱导出 Cookie-Editor JSON 到 `cookies/{email}.json`（对齐 CursorCookie 字段）；汇总阶段将各账号的 `session.json` 与 cookie 打进 `sessions-and-cookies.zip`。
 
 ## 成功标准
 

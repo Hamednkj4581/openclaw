@@ -96,8 +96,10 @@ def pack_sessions_and_cookies(summaries_dir: Path, zip_path: Path) -> int:
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for account_dir in sorted(path for path in summaries_dir.iterdir() if path.is_dir()):
             session_path = account_dir / "session.json"
+            # cookie 在 cookies/ 子目录（也兼容账号目录根下的邮箱.json）
             cookie_paths = sorted(
-                path for path in account_dir.glob("*.json") if path.is_file() and path.name != "session.json"
+                path for path in account_dir.rglob("*.json")
+                if path.is_file() and path.name != "session.json"
             )
             if not session_path.is_file() and not cookie_paths:
                 continue

@@ -21,6 +21,11 @@ on:
         required: false
         default: true
         type: boolean
+      enable_711_proxy:
+        description: '启用 711Proxy 日本住宅代理（关闭则直连）'
+        required: false
+        default: false
+        type: boolean
       payment_link_type:
         description: '支付提链类型（选 gcash 时在汇总阶段检查 zero trial）'
         required: false
@@ -133,6 +138,7 @@ jobs:
       - name: 构建并运行 ChatGPT 注册
         env:
           ENABLE_CHATGPT_MFA: ${{ inputs.enable_mfa }}
+          ENABLE_711_PROXY: ${{ inputs.enable_711_proxy }}
           CAPSOLVER_API_KEY: ${{ secrets.CAPSOLVER_API_KEY }}
           PROXY_USERNAME: ${{ secrets.PROXY_USERNAME }}
           PROXY_PASSWORD: ${{ secrets.PROXY_PASSWORD }}

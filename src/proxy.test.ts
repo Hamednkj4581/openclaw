@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildJapanStickyProxy, buildProxyPacUrl, pacRouteForUrl, rotateStickySession } from './proxy.js';
+import { buildJapanStickyProxy, buildProxyPacUrl, is711ProxyEnabled, pacRouteForUrl, rotateStickySession } from './proxy.js';
+
+test('is711ProxyEnabled defaults to false', () => {
+    delete process.env.ENABLE_711_PROXY;
+    assert.equal(is711ProxyEnabled(), false);
+    process.env.ENABLE_711_PROXY = 'true';
+    assert.equal(is711ProxyEnabled(), true);
+    process.env.ENABLE_711_PROXY = 'false';
+    assert.equal(is711ProxyEnabled(), false);
+});
 
 test('buildJapanStickyProxy creates JP sticky username with fresh session', () => {
     process.env.PROXY_USERNAME = 'testuser';
@@ -30,6 +39,7 @@ test('buildJapanStickyProxy requires credentials', () => {
 });
 
 test('buildProxyPacUrl routes static assets direct and rest via proxy', () => {
+    process.env.ENABLE_711_PROXY = 'true';
     const pacUrl = buildProxyPacUrl({ host: 'us.rotgb.711proxy.com', port: 10000 });
     assert.match(pacUrl, /^data:application\/x-ns-proxy-autoconfig,/);
     const pac = decodeURIComponent(pacUrl.slice(pacUrl.indexOf(',') + 1));
@@ -38,6 +48,12 @@ test('buildProxyPacUrl routes static assets direct and rest via proxy', () => {
     assert.match(pac, /png\|jpe\?g/);
     assert.equal(pacRouteForUrl('https://x.com/a.png'), 'DIRECT');
     assert.equal(pacRouteForUrl('https://x.com/api'), 'PROXY');
+});
+
+test('pacRouteForUrl is always DIRECT when 711 proxy disabled', () => {
+    process.env.ENABLE_711_PROXY = 'false';
+    assert.equal(pacRouteForUrl('https://x.com/a.png'), 'DIRECT');
+    assert.equal(pacRouteForUrl('https://x.com/api'), 'DIRECT');
 });
 
 test('rotateStickySession refreshes session id in username', () => {

@@ -12,7 +12,7 @@ import githubAnnotation from './annotations.js';
 import { credentialsFromEnv, preflightMail, waitForMailVerification } from './mailProvider.js';
 import { installTurnstileHook, solveCloudflareIfPresent, validateCapSolver } from './capsolver.js';
 import { installNetworkCapture } from './networkCapture.js';
-import { buildJapanStickyProxy, buildProxyPacUrl, preflightProxy, rotateStickySession } from './proxy.js';
+import { buildJapanStickyProxy, buildProxyPacUrl, is711ProxyEnabled, preflightProxy, rotateStickySession } from './proxy.js';
 import { MFA_CHALLENGE_SELECTORS, MFA_CODE_SELECTORS, MFA_ENABLED_SELECTORS, MFA_VERIFY_SELECTORS, SIGNUP_EMAIL_SELECTORS, SIGNUP_SELECTORS } from './selectors.js';
 import { cookieFileNameForEmail, writeCookieEditorJson } from './cookieExport.js';
 
@@ -158,13 +158,13 @@ async function openSignup(page: Page): Promise<void> {
 async function reopenChatGptPage(
     browser: Browser,
     oldPage: Page,
-    proxy: { username: string; password: string },
+    proxy: { username: string; password: string } | null,
     redactText: (text: string) => string,
 ): Promise<{ page: Page; networkCapture: ReturnType<typeof installNetworkCapture> }> {
     await oldPage.close().catch(() => undefined);
     const page = await browser.newPage();
     await page.setViewport({ width: 1920, height: 1080 });
-    await page.authenticate({ username: proxy.username, password: proxy.password });
+    if (proxy) await page.authenticate({ username: proxy.username, password: proxy.password });
     const networkCapture = installNetworkCapture(page, redactText);
     await installTurnstileHook(page);
     await page.goto('https://chatgpt.com/', {
@@ -514,17 +514,24 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
         Object.values(credentials).forEach(value => typeof value === 'string' && sensitiveValues.add(value));
         await validateCapSolver();
         await preflightMail(credentials);
-        const proxy = buildJapanStickyProxy();
-        sensitiveValues.add(proxy.password);
-        sensitiveValues.add(process.env.PROXY_USERNAME ?? '');
+        const enable711Proxy = is711ProxyEnabled();
+        const proxy = enable711Proxy ? buildJapanStickyProxy() : null;
+        if (proxy) {
+            sensitiveValues.add(proxy.password);
+            sensitiveValues.add(process.env.PROXY_USERNAME ?? '');
+        } else {
+            logger.info('711Proxy 已关闭（ENABLE_711_PROXY），浏览器直连');
+        }
         const registrationStartedAt = new Date(Date.now() - 30_000);
         const enableChatGptMfa = ['1', 'true'].includes((process.env.ENABLE_CHATGPT_MFA ?? 'true').toLowerCase());
         const chatGptPassword = generatePassword();
         let page!: Page;
         for (let attempt = 1; attempt <= MAX_OPEN_CHATGPT_ATTEMPTS; attempt++) {
-            await preflightProxy(proxy);
-            logger.info('711Proxy 预检通过：%s region=%s session=%s sessTime=%smin（仅测 api.chatgpt.com/v1；PAC：静态资源直连，其余走代理）',
-                proxy.server, proxy.region, proxy.session, proxy.sessTime);
+            if (proxy) {
+                await preflightProxy(proxy);
+                logger.info('711Proxy 预检通过：%s region=%s session=%s sessTime=%smin（仅测 api.chatgpt.com/v1；PAC：静态资源直连，其余走代理）',
+                    proxy.server, proxy.region, proxy.session, proxy.sessTime);
+            }
             chrome = await puppeteer.launch({
                 headless: os.platform() === 'linux',
                 // 固定视口：defaultViewport:null 在 headless Linux 上偶发 0x0，导致点击 Sign up 无 auth 请求、截图报 0 width
@@ -532,8 +539,8 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
                 protocolTimeout: MAX_TIMEOUT, slowMo: 20,
                 handleSIGINT: false, handleSIGTERM: false, handleSIGHUP: false,
                 args: [
-                    // PAC：静态资源直连，HTML/接口走日本代理（page.authenticate 仍作用于代理请求）
-                    `--proxy-pac-url=${buildProxyPacUrl(proxy)}`,
+                    // 启用代理时：PAC 静态资源直连，HTML/接口走日本代理（page.authenticate 仍作用于代理请求）
+                    ...(proxy ? [`--proxy-pac-url=${buildProxyPacUrl(proxy)}`] : []),
                     '--lang=en-US', '--window-size=1920,1080', '--disable-blink-features=AutomationControlled',
                     '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
                     '--disable-accelerated-2d-canvas', '--no-zygote', '--disable-gpu'
@@ -542,7 +549,7 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
             logger.info(chrome.process()?.spawnfile, await chrome.version());
             page = await chrome.newPage();
             await page.setViewport({ width: 1920, height: 1080 });
-            await page.authenticate({ username: proxy.username, password: proxy.password });
+            if (proxy) await page.authenticate({ username: proxy.username, password: proxy.password });
             // 抓取全程 URL 写入 evidence，供分析哪些主机/资源不必走住宅代理
             networkCapture = installNetworkCapture(page, redactText);
             await installTurnstileHook(page);
@@ -565,7 +572,7 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
             await chrome.close().catch(() => undefined);
             chrome = undefined;
             if (attempt >= MAX_OPEN_CHATGPT_ATTEMPTS) throw new Error(navError);
-            rotateStickySession(proxy);
+            if (proxy) rotateStickySession(proxy);
         }
         await evidence(page, 'chatgpt-opened');
         await solveCloudflareIfPresent(page);

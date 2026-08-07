@@ -36,7 +36,7 @@ description: 基于 GitHub Actions 实测结果维护本仓库的 ChatGPT 注册
 - 注册流程必须按页面状态分支处理邮箱、密码、邮件验证链接、六位验证码、个人信息和登录成功页面，不得假设顺序固定。例如验证码后可能进入 `auth.openai.com/about-you`，此时应继续处理个人信息，不能仍按验证码阶段直接判定失败。
 - 选择通用 `Continue` 按钮时排除 Google 等 OAuth 按钮；仅在对应字段实际存在时填写密码或个人信息。
 - 出现 Turnstile 时使用 CapSolver 求解，并确认 token 已被页面接受；余额接口成功不代表挑战成功。
-- 只有进入已登录的 ChatGPT 页面才算注册成功；MFA 默认开启，仅在工作流输入明确关闭时跳过配置。
+- 只有进入已登录的 ChatGPT 页面才算注册成功；MFA 默认开启，仅在工作流输入明确关闭时跳过配置。开启 MFA 失败时只告警，不得阻断后续 session/cookie 导出与结果写入。
 - 关键阶段和异常均保存配对的截图与脱敏 DOM。证据名称使用账号索引和步骤名，不含邮箱、验证码、密码、token、Cookie 或验证链接。
 
 ## 工作流约束
@@ -47,6 +47,7 @@ description: 基于 GitHub Actions 实测结果维护本仓库的 ChatGPT 注册
 - `CAPSOLVER_API_KEY` 只能来自 GitHub Secret。每个账号独立上传结果和完整过程证据。
 - 每次注册生成新 ChatGPT 密码，并在登录成功后从 `/api/auth/session` 提取 accessToken 写入结果；只有启用 MFA 时才写入 OTP 密钥。结果格式：`email----password----accessToken----时间`，启用 MFA 时为 `email----password----otpSecret----accessToken----时间`。
 - 额外导出截图格式的 `session.json`（`user`/`expires`/`account`/`accessToken`/`sessionToken`/`authProvider`）：session 接口字段 + Cookie 中的 `sessionToken`，与文本结果一并上传 Artifact。
+- 注册成功后额外按邮箱导出 Cookie-Editor JSON（如 `user@example.com.json`，对齐 CursorCookie 字段）；汇总阶段将各账号的 `session.json` 与 cookie 打进 `sessions-and-cookies.zip`。
 
 ## 成功标准
 

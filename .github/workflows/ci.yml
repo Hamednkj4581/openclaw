@@ -157,6 +157,7 @@ jobs:
           path: |
             step-summary
             session.json
+            '*@*.json'
           if-no-files-found: ignore
           retention-days: 7
 
@@ -197,5 +198,6 @@ jobs:
             all-access-tokens.txt
             web-summary.txt
             zero-trial-tokens.txt
+            sessions-and-cookies.zip
           if-no-files-found: ignore
           retention-days: 7

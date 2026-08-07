@@ -14,6 +14,7 @@ import { installTurnstileHook, solveCloudflareIfPresent, validateCapSolver } fro
 import { installNetworkCapture } from './networkCapture.js';
 import { buildJapanStickyProxy, buildProxyPacUrl, preflightProxy, rotateStickySession } from './proxy.js';
 import { MFA_CHALLENGE_SELECTORS, MFA_CODE_SELECTORS, MFA_ENABLED_SELECTORS, MFA_VERIFY_SELECTORS, SIGNUP_EMAIL_SELECTORS, SIGNUP_SELECTORS } from './selectors.js';
+import { cookieFileNameForEmail, writeCookieEditorJson } from './cookieExport.js';
 
 const MAX_TIMEOUT = Math.pow(2, 31) - 1;
 const EVIDENCE_TIMEOUT_MS = 15_000;
@@ -305,6 +306,19 @@ function writeSessionJson(session: SessionExport): void {
     const filePath = process.env.ACCOUNT_SESSION_JSON_PATH || 'session.json';
     fs.writeFileSync(filePath, JSON.stringify(session, null, 2) + '\n');
     logger.info('已导出 session JSON：%s', filePath);
+}
+
+/** 按邮箱写出 Cookie-Editor JSON，供后续导入浏览器 */
+function writeAccountCookies(email: string, cookies: Array<{
+    name: string; value: string; domain: string; path?: string;
+    expires?: number; httpOnly?: boolean; secure?: boolean; session?: boolean; sameSite?: string;
+}>): string {
+    const dir = process.env.ACCOUNT_COOKIE_DIR || '.';
+    fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, cookieFileNameForEmail(email));
+    const count = writeCookieEditorJson(filePath, cookies);
+    logger.info('已导出 Cookie-Editor JSON：%s（%s 条）', filePath, count);
+    return filePath;
 }
 
 async function extractSessionExport(page: Page): Promise<SessionExport> {
@@ -624,16 +638,30 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
             throw new Error(`注册流程未进入已登录 ChatGPT 状态，当前状态：${state}，URL：${page.url().replace(/[?#].*$/, '')}`);
         }
         await evidence(page, 'authenticated');
-        const otpSecret = enableChatGptMfa ? await enableMfa(page, evidence) : undefined;
+        // 先导出 session/cookie：2FA 开启失败不得影响注册成功后的产物
         const session = await extractSessionExport(page);
         sensitiveValues.add(session.accessToken);
         sensitiveValues.add(session.sessionToken);
+        writeSessionJson(session);
+        writeAccountCookies(email, await page.cookies());
         await evidence(page, 'access-token-ready');
+
+        let otpSecret: string | undefined;
+        if (enableChatGptMfa) {
+            try {
+                otpSecret = await enableMfa(page, evidence);
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                logger.warn('开启 ChatGPT 2FA 失败，不影响后续流程：%s', message);
+                githubAnnotation('warning', `开启 ChatGPT 2FA 失败，已跳过：${message}`);
+                await evidence(page, 'mfa-enable-failed').catch(() => undefined);
+            }
+        }
+
         Utility.appendStepSummary(
             [email, chatGptPassword, ...(otpSecret ? [otpSecret] : []), session.accessToken, new Date().toString()].join('----')
         );
-        writeSessionJson(session);
-        logger.info('ChatGPT 注册完成%s，已提取 accessToken 并导出 session JSON', otpSecret ? '，已开启 2FA' : '');
+        logger.info('ChatGPT 注册完成%s，已提取 accessToken 并导出 session/cookie', otpSecret ? '，已开启 2FA' : '');
     } catch (error) {
         await fail(error);
     } finally {

@@ -7,10 +7,22 @@
 | 文件 | 用途 |
 |------|------|
 | 根目录 `PAT` | 触发 Actions、upsert GitHub Secrets；同步到 Pages 的 `GITHUB_PAT` |
-| 根目录 `CLOUDFLARE_API_TOKEN` | `wrangler` 部署与创建 KV |
+| 根目录 `CLOUDFLARE_API_TOKEN` | `wrangler` 部署与创建 KV（自定义 Token，权限见下） |
 | 根目录 `WEBHOOK_SECRET`（可选） | 部署时对齐 GitHub + Pages；缺失时由脚本生成 |
 
-可选：环境变量 `CLOUDFLARE_ACCOUNT_ID`；否则写入 [`wrangler.toml`](wrangler.toml) 的 `account_id`。
+| 根目录 `CLOUDFLARE_ACCOUNT_ID`（可选） | Pages 不支持写进 wrangler.toml；单账号可由脚本自动生成 |
+
+### Cloudflare API Token 权限
+
+Dashboard → **API Tokens → Create Custom Token**：
+
+| 范围 | 权限 |
+|------|------|
+| Account → Cloudflare Pages | Edit |
+| Account → Workers KV Storage | Edit |
+| Account → Account Settings | Read |
+
+只用 `*.pages.dev` 时不需要 Zone DNS。不要只用「Edit Cloudflare Workers」模板（可能缺 Pages Edit）。
 
 ## 本地开发
 

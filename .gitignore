@@ -11,6 +11,7 @@ __pycache__/
 /测试邮箱.txt
 /PAT
 /CLOUDFLARE_API_TOKEN
+/CLOUDFLARE_ACCOUNT_ID
 /WEBHOOK_SECRET
 /web/node_modules/
 /web/dist/

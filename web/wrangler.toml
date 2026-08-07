@@ -1,16 +1,13 @@
-# Cloudflare Pages 项目配置（account_id / KV id 由部署脚本或本地填写）
+# Cloudflare Pages 项目配置（KV id 由部署脚本回写；account_id 用环境变量或根目录 CLOUDFLARE_ACCOUNT_ID 文件）
 name = "gpt-web-console"
 compatibility_date = "2025-01-15"
 pages_build_output_dir = "dist"
 
-# 部署前填写真实 account_id，或设置环境变量 CLOUDFLARE_ACCOUNT_ID
-# account_id = "your_account_id"
-
 [[kv_namespaces]]
 binding = "TASKS"
-# 首次部署由 scripts/deploy_and_sync_webhook.py 创建并回写；本地可临时用 preview
-id = "00000000000000000000000000000000"
-preview_id = "00000000000000000000000000000000"
+# 首次部署由 scripts/deploy_and_sync_webhook.py 创建并回写
+id = "1a37abad6b54492a967eb1ae8fd3dbe9"
+preview_id = "1a37abad6b54492a967eb1ae8fd3dbe9"
 
 [vars]
 GITHUB_OWNER = "Hamednkj4581"

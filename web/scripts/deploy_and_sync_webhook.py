@@ -208,21 +208,38 @@ def ensure_pages_project(account_id: str, cf_token: str) -> None:
         print("创建 Pages 项目未确认成功，将继续尝试 wrangler deploy")
 
 
-def put_pages_secret(name: str, value: str, cf_token: str, account_id: str) -> None:
-    env = os.environ.copy()
-    env["CLOUDFLARE_API_TOKEN"] = cf_token
-    env["CLOUDFLARE_ACCOUNT_ID"] = account_id
+def run_captured(
+    args: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str] | None = None,
+    input_text: str | None = None,
+) -> tuple[int, str]:
+    """运行子进程并用 UTF-8 解码输出，避免 Windows GBK 解码失败。"""
     proc = subprocess.run(
-        ["npx", "wrangler", "pages", "secret", "put", name, "--project-name", PROJECT_NAME],
-        cwd=str(WEB_DIR),
-        input=value + "\n",
-        text=True,
+        args,
+        cwd=str(cwd),
+        input=None if input_text is None else input_text.encode("utf-8"),
         capture_output=True,
         env=env,
         shell=os.name == "nt",
     )
-    if proc.returncode != 0:
-        raise SystemExit(f"写入 Pages secret {name} 失败：{(proc.stderr or proc.stdout).strip()}")
+    output = b"".join(filter(None, [proc.stdout, proc.stderr])).decode("utf-8", errors="replace")
+    return proc.returncode, output
+
+
+def put_pages_secret(name: str, value: str, cf_token: str, account_id: str) -> None:
+    env = os.environ.copy()
+    env["CLOUDFLARE_API_TOKEN"] = cf_token
+    env["CLOUDFLARE_ACCOUNT_ID"] = account_id
+    code, output = run_captured(
+        ["npx", "wrangler", "pages", "secret", "put", name, "--project-name", PROJECT_NAME],
+        cwd=WEB_DIR,
+        env=env,
+        input_text=value + "\n",
+    )
+    if code != 0:
+        raise SystemExit(f"写入 Pages secret {name} 失败：{output.strip()}")
 
 
 def run_build() -> None:
@@ -241,40 +258,46 @@ def run_deploy(cf_token: str, account_id: str) -> str:
     env = os.environ.copy()
     env["CLOUDFLARE_API_TOKEN"] = cf_token
     env["CLOUDFLARE_ACCOUNT_ID"] = account_id
-    proc = subprocess.run(
+    # 让 Node/wrangler 尽量输出 UTF-8，避免控制台乱码
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    env["FORCE_COLOR"] = "0"
+    code, output = run_captured(
         ["npx", "wrangler", "pages", "deploy", "dist", "--project-name", PROJECT_NAME, "--branch", "main"],
-        cwd=str(WEB_DIR),
-        capture_output=True,
-        text=True,
+        cwd=WEB_DIR,
         env=env,
-        shell=os.name == "nt",
     )
-    output = (proc.stdout or "") + "\n" + (proc.stderr or "")
-    if proc.returncode != 0:
+    if code != 0:
         raise SystemExit(f"wrangler pages deploy 失败：\n{output}")
 
+    stable = f"https://{PROJECT_NAME}.pages.dev"
+    if stable in output or re.search(rf"https://{re.escape(PROJECT_NAME)}\.pages\.dev", output):
+        return stable
     match = re.search(r"https://[a-zA-Z0-9.-]+\.pages\.dev", output)
     if match:
         return match.group(0).rstrip("/")
-    # 回退到项目默认域名
-    return f"https://{PROJECT_NAME}.pages.dev"
+    return stable
 
 
 def resolve_account_id(cf_token: str) -> str:
-    account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID") or read_toml_value("account_id")
+    account_file = REPO_ROOT / "CLOUDFLARE_ACCOUNT_ID"
+    account_id = (
+        os.environ.get("CLOUDFLARE_ACCOUNT_ID")
+        or (account_file.read_text(encoding="utf-8").strip() if account_file.is_file() else "")
+    )
     if account_id and not account_id.startswith("your_"):
         return account_id
 
     status, payload = cf_request("GET", "https://api.cloudflare.com/client/v4/accounts", cf_token)
     if status != 200 or not payload.get("success") or not payload.get("result"):
-        raise SystemExit("无法自动获取 Cloudflare account_id，请在 wrangler.toml 填写 account_id")
+        raise SystemExit("无法自动获取 Cloudflare account_id，请在根目录创建 CLOUDFLARE_ACCOUNT_ID 文件")
     accounts = payload["result"]
     if len(accounts) != 1:
         names = ", ".join(f"{a.get('name')}={a.get('id')}" for a in accounts[:5])
-        raise SystemExit(f"检测到多个 Cloudflare 账号，请在 wrangler.toml 指定 account_id（{names}）")
+        raise SystemExit(f"检测到多个 Cloudflare 账号，请在根目录 CLOUDFLARE_ACCOUNT_ID 指定（{names}）")
     account_id = accounts[0]["id"]
-    write_toml_value("account_id", account_id)
-    print("已写入 account_id 到 wrangler.toml")
+    # Pages 的 wrangler.toml 不支持 account_id，写入未跟踪本地文件
+    account_file.write_text(account_id + "\n", encoding="utf-8")
+    print("已写入根目录 CLOUDFLARE_ACCOUNT_ID（请保持未跟踪）")
     return account_id
 
 

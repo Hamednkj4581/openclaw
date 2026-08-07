@@ -21,10 +21,24 @@ description: 构建并部署 web/ 到 Cloudflare Pages，自动维护 GitHub Sec
 ## 前置
 
 1. 根目录存在有效 `PAT`（规则见 `maintain-github-pat`）。
-2. 根目录存在 `CLOUDFLARE_API_TOKEN`（需 Pages 编辑、Account 读、KV 写权限）。
+2. 根目录存在 `CLOUDFLARE_API_TOKEN`（自定义 Token，权限见下节）。
 3. 可选根目录 `WEBHOOK_SECRET`：有则每次部署对齐 GitHub + Pages；无且 GitHub 也没有时由脚本生成并落盘。
 4. 已安装 Node.js；部署脚本会在 `web/` 内执行 `npm ci`/`npm install` 与 `wrangler`。
 5. 若需 upsert GitHub Secrets：本机可 `pip install pynacl`。
+
+## Cloudflare API Token 权限
+
+在 Cloudflare Dashboard → **My Profile → API Tokens → Create Token → Create Custom Token**：
+
+| 范围 | 权限 | 用途 |
+|------|------|------|
+| Account → Cloudflare Pages | Edit | 创建/部署 Pages、写入 Pages secrets |
+| Account → Workers KV Storage | Edit | 创建并绑定 `TASKS` KV |
+| Account → Account Settings | Read | 自动读取 `account_id`（单账号建议加上） |
+
+- Account resources：选目标 Cloudflare 账号。
+- 仅用 `*.pages.dev` 时**不需要** Zone / DNS 权限。
+- 勿依赖「Edit Cloudflare Workers」模板 alone：可能缺少 **Cloudflare Pages: Edit**。
 
 ## 执行步骤
 
@@ -37,7 +51,7 @@ python web/scripts/deploy_and_sync_webhook.py
 脚本会：
 
 1. 读取 `CLOUDFLARE_API_TOKEN` 与 `PAT`
-2. 解析/写入 `web/wrangler.toml` 的 `account_id`
+2. 解析 `account_id`（环境变量 / 根目录 `CLOUDFLARE_ACCOUNT_ID` 文件；缺失且仅一账号时自动写入该文件）
 3. 若 KV `TASKS` 仍是占位 id，则创建并回写真实 id
 4. `web/` 下构建前端，`wrangler pages deploy`
 5. Upsert GitHub Secret `WEB_CALLBACK_URL={origin}/api/webhook`
@@ -54,6 +68,6 @@ python web/scripts/deploy_and_sync_webhook.py
 ## 失败处理
 
 - 缺少凭据文件：停止并说明缺哪个文件
-- 多 Cloudflare 账号：要求在 `web/wrangler.toml` 填写 `account_id`
+- 多 Cloudflare 账号：要求在根目录 `CLOUDFLARE_ACCOUNT_ID` 文件填写目标账号
 - `WEBHOOK_SECRET` 已在 GitHub 但 Pages 缺失：提示手动对齐同一值（无法从 GitHub 读出 secret）
 - 禁止用轮换 secret 的方式“猜”修复进行中的任务

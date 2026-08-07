@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildJapanStickyProxy, buildProxyPacUrl, decideProxyRegion, geoFromPayload, pacRouteForUrl, rotateStickySession } from './proxy.js';
+import { buildJapanStickyProxy, buildProxyPacUrl, pacRouteForUrl, rotateStickySession } from './proxy.js';
 
 test('buildJapanStickyProxy creates JP sticky username with fresh session', () => {
     process.env.PROXY_USERNAME = 'testuser';
@@ -38,30 +38,6 @@ test('buildProxyPacUrl routes static assets direct and rest via proxy', () => {
     assert.match(pac, /png\|jpe\?g/);
     assert.equal(pacRouteForUrl('https://x.com/a.png'), 'DIRECT');
     assert.equal(pacRouteForUrl('https://x.com/api'), 'PROXY');
-});
-
-test('geoFromPayload prefers ISO country codes over full names', () => {
-    assert.deepEqual(geoFromPayload({ country: 'Kyrgyzstan', countryCode: 'KG', query: '1.1.1.1' }), { ip: '1.1.1.1', country: 'KG' });
-    assert.deepEqual(geoFromPayload({ country: 'JP', ip: '2.2.2.2' }), { ip: '2.2.2.2', country: 'JP' });
-    assert.deepEqual(geoFromPayload({ country: 'Japan', ip: '3.3.3.3' }), { ip: '3.3.3.3', country: '' });
-});
-
-test('decideProxyRegion accepts expected country even when sources conflict', () => {
-    const decision = decideProxyRegion('JP', [
-        { ip: '1.1.1.1', country: 'KG', host: 'ipinfo.io' },
-        { ip: '1.1.1.1', country: 'JP', host: 'ip-api.com' },
-    ]);
-    assert.equal(decision.ok, true);
-    assert.match(decision.detail, /冲突/);
-});
-
-test('decideProxyRegion rejects when all sources disagree with expected region', () => {
-    const decision = decideProxyRegion('JP', [
-        { ip: '1.1.1.1', country: 'KG', host: 'ipinfo.io' },
-        { ip: '1.1.1.1', country: 'KG', host: 'ip-api.com' },
-    ]);
-    assert.equal(decision.ok, false);
-    assert.match(decision.detail, /出口国家为 KG/);
 });
 
 test('rotateStickySession refreshes session id in username', () => {

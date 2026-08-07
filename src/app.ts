@@ -509,7 +509,7 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
         let page!: Page;
         for (let attempt = 1; attempt <= MAX_OPEN_CHATGPT_ATTEMPTS; attempt++) {
             await preflightProxy(proxy);
-            logger.info('711Proxy 预检通过：%s region=%s session=%s sessTime=%smin（PAC：静态资源直连，其余走代理）',
+            logger.info('711Proxy 预检通过：%s region=%s session=%s sessTime=%smin（仅测 api.chatgpt.com/v1；PAC：静态资源直连，其余走代理）',
                 proxy.server, proxy.region, proxy.session, proxy.sessTime);
             chrome = await puppeteer.launch({
                 headless: os.platform() === 'linux',

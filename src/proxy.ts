@@ -13,13 +13,8 @@ export type ProxyConfig = {
     sessTime: number;
 };
 
-const GEO_ENDPOINTS = [
-    'https://ipinfo.io/json',
-    'http://ip-api.com/json/?fields=status,country,countryCode,query',
-    'https://ipapi.co/json/',
-] as const;
-
 const MAX_SESSION_ATTEMPTS = 3;
+const CHATGPT_API_PROBE_URL = 'https://api.chatgpt.com/v1';
 
 /** PAC 与抓取分析共用：静态资源扩展名直连，其余走代理 */
 export const STATIC_ASSET_PATTERN = String.raw`\.(png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf|otf|eot|css|js|map)(\?|$)`;
@@ -70,87 +65,27 @@ export function buildProxyPacUrl(proxy: Pick<ProxyConfig, 'host' | 'port'>): str
     return `data:application/x-ns-proxy-autoconfig,${encodeURIComponent(pac)}`;
 }
 
-type GeoLookup = { ip?: string; country?: string; countryCode?: string; country_code?: string; query?: string };
-
-/** 优先取 ISO 两位码（ip-api 的 country 是全名，不能直接用） */
-export function geoFromPayload(data: GeoLookup): { ip: string; country: string } {
-    const code = (data.countryCode ?? data.country_code ?? '').toUpperCase();
-    const raw = (data.country ?? '').toUpperCase();
-    const country = code || (/^[A-Z]{2}$/.test(raw) ? raw : '');
-    const ip = data.ip ?? data.query ?? 'unknown';
-    return { ip, country };
-}
-
-async function lookupGeoVia(
-    url: string,
-    axiosProxy: { protocol: 'http'; host: string; port: number; auth: { username: string; password: string } }
-): Promise<{ ip: string; country: string; host: string }> {
-    let lastError: unknown;
-    for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-            // 使用 request 而非 get：patches 会给 axios.get 注入 agent，可能绕过 proxy
-            const { data } = await axios.request<GeoLookup>({ method: 'GET', url, timeout: 30_000, proxy: axiosProxy });
-            const { ip, country } = geoFromPayload(data);
-            return { ip, country, host: new URL(url).host };
-        } catch (error) {
-            lastError = error;
-            const status = axios.isAxiosError(error) ? error.response?.status : undefined;
-            if (status === 429 && attempt < 2) {
-                await new Promise(r => setTimeout(r, 1500 * attempt));
-                continue;
-            }
-            throw error;
-        }
-    }
-    throw lastError instanceof Error ? lastError : new Error(String(lastError));
-}
-
-/**
- * 多源交叉核对出口国家：单源可能误标；仅当有效结果均非目标国时判定不匹配。
- * 任一侧报目标国则放行（冲突时打警告）。
- */
-export function decideProxyRegion(
-    expected: string,
-    samples: Array<{ ip: string; country: string; host: string }>
-): { ok: boolean; ip: string; countries: string[]; detail: string } {
-    const valid = samples.filter(s => s.country);
-    if (!valid.length) return { ok: false, ip: 'unknown', countries: [], detail: '711Proxy 预检未返回国家信息' };
-    const ip = valid.find(s => s.ip !== 'unknown')?.ip ?? valid[0].ip;
-    const countries = [...new Set(valid.map(s => s.country))];
-    const matched = valid.filter(s => s.country === expected);
-    if (matched.length) {
-        if (countries.length > 1) {
-            const conflict = valid.map(s => `${s.host}=${s.country}`).join(', ');
-            return { ok: true, ip, countries, detail: `地理库冲突但含 ${expected}，放行（${conflict}）` };
-        }
-        return { ok: true, ip, countries, detail: `${matched[0].host}=${expected}` };
-    }
-    const summary = valid.map(s => `${s.host}=${s.country}`).join(', ');
-    return { ok: false, ip, countries, detail: `出口国家为 ${countries.join('/')}，期望 ${expected}（ip=${ip}；${summary}）` };
-}
-
-/** 经代理探测 chatgpt.com：地理预检通过不代表 HTTPS 隧道可用（常见 ERR_TUNNEL_CONNECTION_FAILED） */
+/** 经代理探测 api.chatgpt.com：有 HTTP 响应即视为隧道可用（不校验地理） */
 export async function probeChatgptViaProxy(
     axiosProxy: { protocol: 'http'; host: string; port: number; auth: { username: string; password: string } }
-): Promise<void> {
-    await axios.request({
+): Promise<number> {
+    const response = await axios.request({
         method: 'GET',
-        url: 'https://chatgpt.com/',
+        url: CHATGPT_API_PROBE_URL,
         timeout: 20_000,
         proxy: axiosProxy,
         maxRedirects: 5,
         // 任意 HTTP 响应都说明隧道已通；连接级失败才会抛错
         validateStatus: () => true,
         headers: { 'User-Agent': 'Mozilla/5.0' },
-        // 避免把整页 HTML 读进内存
         responseType: 'stream',
         maxContentLength: 64 * 1024,
-    }).then(response => {
-        response.data?.destroy?.();
     });
+    response.data?.destroy?.();
+    return response.status;
 }
 
-/** 启动浏览器前预检：多源核对出口国，并探测 ChatGPT HTTPS 隧道；失败则换 sticky session 重试 */
+/** 启动浏览器前预检：只测代理访问 ChatGPT API 是否可达；失败则换 sticky session 重试 */
 export async function preflightProxy(proxy: ProxyConfig): Promise<void> {
     const axiosProxy = {
         protocol: 'http' as const,
@@ -158,45 +93,21 @@ export async function preflightProxy(proxy: ProxyConfig): Promise<void> {
         port: proxy.port,
         auth: { username: proxy.username, password: proxy.password },
     };
-    let lastMismatch = '';
+    let lastError = '';
     for (let sessionAttempt = 1; sessionAttempt <= MAX_SESSION_ATTEMPTS; sessionAttempt++) {
         axiosProxy.auth = { username: proxy.username, password: proxy.password };
-        const samples: Array<{ ip: string; country: string; host: string }> = [];
-        for (const url of GEO_ENDPOINTS) {
-            try {
-                const sample = await lookupGeoVia(url, axiosProxy);
-                logger.info('711Proxy 出口：ip=%s country=%s via=%s session=%s attempt=%s',
-                    sample.ip, sample.country || 'unknown', sample.host, proxy.session, sessionAttempt);
-                samples.push(sample);
-            } catch (error) {
-                logger.warn('711Proxy 预检失败：%s attempt=%s %s', new URL(url).host, sessionAttempt,
-                    axios.isAxiosError(error) ? `${error.response?.status ?? ''} ${error.message}` : String(error));
-            }
-        }
-        const decision = decideProxyRegion(proxy.region, samples);
-        if (!decision.ok) {
-            lastMismatch = decision.detail || '711Proxy 预检失败';
-            if (!samples.some(s => s.country)) {
-                throw new Error(lastMismatch.startsWith('711Proxy') ? lastMismatch : `711Proxy 预检失败：${lastMismatch}`);
-            }
-            if (sessionAttempt >= MAX_SESSION_ATTEMPTS) break;
-            logger.warn('711Proxy %s；更换 sticky session 重试 %s/%s', lastMismatch, sessionAttempt + 1, MAX_SESSION_ATTEMPTS);
-            rotateStickySession(proxy);
-            continue;
-        }
-        if (/冲突/.test(decision.detail)) logger.warn('711Proxy 预检：%s', decision.detail);
-        else logger.info('711Proxy 预检通过：%s', decision.detail);
-
         try {
-            await probeChatgptViaProxy(axiosProxy);
-            logger.info('711Proxy ChatGPT 连通预检通过：session=%s', proxy.session);
+            const status = await probeChatgptViaProxy(axiosProxy);
+            logger.info('711Proxy 可用性预检通过：api.chatgpt.com/v1 status=%s session=%s attempt=%s',
+                status, proxy.session, sessionAttempt);
             return;
         } catch (error) {
-            lastMismatch = `ChatGPT HTTPS 隧道不可用（${axios.isAxiosError(error) ? error.message : String(error)}）`;
+            lastError = axios.isAxiosError(error) ? error.message : String(error);
             if (sessionAttempt >= MAX_SESSION_ATTEMPTS) break;
-            logger.warn('711Proxy %s；更换 sticky session 重试 %s/%s', lastMismatch, sessionAttempt + 1, MAX_SESSION_ATTEMPTS);
+            logger.warn('711Proxy 可用性预检失败：%s；更换 sticky session 重试 %s/%s',
+                lastError, sessionAttempt + 1, MAX_SESSION_ATTEMPTS);
             rotateStickySession(proxy);
         }
     }
-    throw new Error(`711Proxy ${lastMismatch}`);
+    throw new Error(`711Proxy 可用性预检失败：${lastError}`);
 }

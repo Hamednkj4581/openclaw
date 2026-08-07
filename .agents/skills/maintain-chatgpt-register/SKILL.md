@@ -21,7 +21,7 @@ description: 基于 GitHub Actions 实测结果维护本仓库的 ChatGPT 注册
 
 1. 检查 `git status`，确认位于 `main`（用户主动明确要求其他分支时除外），并检查工作流和相关源码。
 2. 修改前从 `PAT` 读取 token；用 `.github/scripts/sync_forward_mailboxes.py` **每次触发前**把 `forward_mailboxes.txt` upsert 到 Secret `FORWARD_MAILBOXES`（单次 API，可忽略性能影响），再触发当前工作分支的 `ci.yml`，等待运行结束。账号输入取自 `测试邮箱.txt`。
-3. 检查每个 `register (N)` job 的结论；不能只看工作流顶层结论，因为注册任务使用了 `continue-on-error`。
+3. 检查每个 `register (N)` job 的结论；注册任务仍有 `continue-on-error`（便于部分失败时继续汇总），但矩阵全部失败时 `collect-summary` 会失败，工作流顶层为 failure。部分失败时顶层仍可能 success，须逐个看 `register (N)`。
 4. 注册失败时下载该账号的失败日志和 `evidence-N`，结合最后几个阶段的 URL、标题、截图和 DOM 确定失败点。敏感数据只在进程内使用，产物下载到仓库外的临时目录。
 5. 先分类再处理：
    - 页面状态、选择器、状态机或工作流错误：进行最小修改，并尽量兼容新旧页面。

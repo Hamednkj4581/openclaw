@@ -151,6 +151,10 @@ def main() -> None:
             summary.write(f"access token: {len(tokens)}\n")
             summary.write(f"session/cookie zip 条目: {packed}\n")
 
+    # 矩阵账号可 continue-on-error；全部失败时无成功结果，汇总阶段失败以让工作流结论为 failure
+    if not results:
+        raise SystemExit("全部账号注册失败，无成功结果，工作流标记为失败")
+
     if payment_link_type != "gcash":
         print(f"支付提链未选择 gcash（当前={payment_link_type}），跳过 zero trial 检查")
         return

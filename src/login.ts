@@ -75,17 +75,75 @@ async function first(page: Page, selectors: string[]): Promise<ElementHandle<Ele
     return null;
 }
 
+/** 等待邮箱表单完成 React 水合，避免 Continue 变成 /auth/login?email= 刷新 */
+async function waitForEmailFormReady(page: Page, timeoutMs = 30_000): Promise<void> {
+    await Utility.waitForFunction(async () => {
+        const ready = await page.evaluate(() => {
+            const email = document.querySelector(
+                '#mobile-auth-email, #email, input[name="email"], input[name="login_hint"], input[type="email"]'
+            ) as HTMLInputElement | null;
+            if (!email) return null;
+            const form = email.closest('form');
+            if (!form) return null;
+            const dialog = form.closest('dialog') as HTMLDialogElement | null;
+            if (dialog && !(dialog.open || dialog.hasAttribute('open'))) return null;
+            const hydrated = (el: Element) => Object.keys(el).some(key =>
+                key.startsWith('__reactFiber')
+                || key.startsWith('__reactProps')
+                || key.startsWith('__reactInternalInstance'));
+            return (hydrated(form) || hydrated(email)) ? true : null;
+        }).catch(() => null);
+        return ready;
+    }, { pollInterval: 300, timeout: timeoutMs }).catch(() => {
+        throw new Error('登录邮箱表单未完成 React 水合，继续提交只会触发原生刷新');
+    });
+}
+
+/** 写入受控邮箱输入：键盘输入 + 原生 value setter，确保 React state 同步 */
+async function fillEmailInput(page: Page, email: string): Promise<void> {
+    const emailInput = await first(page, SIGNUP_EMAIL_SELECTORS);
+    if (!emailInput) throw new Error('登录邮箱输入框不可见');
+    await emailInput.click({ clickCount: 3 }).catch(() => undefined);
+    await page.keyboard.press('Backspace').catch(() => undefined);
+    await emailInput.type(email, { delay: 15 });
+    await emailInput.evaluate((el, value) => {
+        const input = el as HTMLInputElement;
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+        setter?.call(input, value);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+    }, email);
+}
+
 async function clickContinue(page: Page): Promise<void> {
     const beforeUrl = page.url();
-    // lightweight auth 邮箱表单：用 requestSubmit，避免坐标点偏/点到关闭层
+    // 优先点邮箱表单的 submit；禁止 form.submit()（会绕过 React onSubmit，经典页会 GET 刷新）
     const formSubmitted = await page.evaluate(() => {
-        const form = document.querySelector('form[data-auth-provider="email"]') as HTMLFormElement | null;
+        const provider = document.querySelector('form[data-auth-provider="email"]') as HTMLFormElement | null;
+        let form: HTMLFormElement | null = null;
+        if (provider) {
+            const dialog = provider.closest('dialog') as HTMLDialogElement | null;
+            if (!dialog || dialog.open || dialog.hasAttribute('open')) form = provider;
+        }
+        if (!form) {
+            const email = document.querySelector(
+                '#mobile-auth-email, #email, input[name="email"], input[name="login_hint"], input[type="email"]'
+            ) as HTMLInputElement | null;
+            form = email?.closest('form') as HTMLFormElement | null;
+        }
         if (!form) return false;
-        const dialog = form.closest('dialog') as HTMLDialogElement | null;
-        if (dialog && !(dialog.open || dialog.hasAttribute('open'))) return false;
-        if (typeof form.requestSubmit === 'function') form.requestSubmit();
-        else form.submit();
-        return true;
+        const submit = form.querySelector(
+            'button[type="submit"]:not([disabled]), button.emailButton[type="submit"]:not([disabled])'
+        ) as HTMLButtonElement | null;
+        if (submit) {
+            submit.click();
+            return true;
+        }
+        if (typeof form.requestSubmit === 'function') {
+            form.requestSubmit();
+            return true;
+        }
+        return false;
     }).catch(() => false);
     if (formSubmitted) return;
 
@@ -101,6 +159,27 @@ async function clickContinue(page: Page): Promise<void> {
             return;
         throw error;
     }
+}
+
+/** bottom-sheet login_with 表单提交失败时，按表单字段拼 GET 跳转 */
+async function navigateLoginWithFallback(page: Page, email: string): Promise<boolean> {
+    const target = await page.evaluate((emailValue) => {
+        const form = document.querySelector('form[data-auth-provider="email"]') as HTMLFormElement | null;
+        if (!form?.action || !/login_with/i.test(form.action)) return '';
+        const params = new URLSearchParams();
+        const hint = (form.querySelector('#mobile-auth-email, input[name="login_hint"]') as HTMLInputElement | null)?.value
+            || emailValue;
+        params.set('login_hint', hint);
+        for (const name of ['callback_path', 'screen_hint']) {
+            const hidden = form.querySelector(`[name="${name}"]`) as HTMLInputElement | null;
+            if (hidden?.value) params.set(name, hidden.value);
+        }
+        return `${form.action.split('?')[0]}?${params.toString()}`;
+    }, email).catch(() => '');
+    if (!target) return false;
+    logger.info('邮箱 Continue 未前进，改走 login_with 跳转兜底');
+    await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 60_000, retries: 2 });
+    return true;
 }
 
 async function chromeNavigationFailure(page: Page): Promise<string | null> {
@@ -325,15 +404,24 @@ async function extractAccessToken(page: Page): Promise<string> {
         await solveCloudflareIfPresent(page);
         await openLogin(page);
         await evidence(page, 'login-opened');
-        const emailInput = await first(page, SIGNUP_EMAIL_SELECTORS);
-        if (!emailInput) throw new Error('登录邮箱输入框不可见');
-        await emailInput.click({ clickCount: 3 }).catch(() => undefined);
-        await emailInput.type(account.email);
+        await waitForEmailFormReady(page);
+        await fillEmailInput(page, account.email);
         await evidence(page, 'email-entered');
         await clickContinue(page);
         await solveCloudflareIfPresent(page);
 
-        let state = await waitForState(page, ['password', 'mfa-challenge', 'authenticated']);
+        let state = await waitForState(page, ['password', 'mfa-challenge', 'authenticated'], 45_000);
+        // SSR 未水合时 Continue 只会刷新 ?email=；水合后或 login_with 再试一次
+        if (state === 'email' || state === 'unknown') {
+            logger.warn('邮箱 Continue 后仍为 %s，准备重试提交', state);
+            if (!await navigateLoginWithFallback(page, account.email)) {
+                await waitForEmailFormReady(page);
+                await fillEmailInput(page, account.email);
+                await clickContinue(page);
+            }
+            await solveCloudflareIfPresent(page);
+            state = await waitForState(page, ['password', 'mfa-challenge', 'authenticated'], 60_000);
+        }
         await evidence(page, `after-email-${state}`);
 
         if (state === 'password') {

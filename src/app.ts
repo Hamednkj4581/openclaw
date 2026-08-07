@@ -86,15 +86,33 @@ async function first(page: Page, selectors: string[]): Promise<ElementHandle<Ele
 
 async function clickContinue(page: Page): Promise<void> {
     const beforeUrl = page.url();
-    // lightweight auth 邮箱表单：用 requestSubmit，避免坐标点偏/点到关闭层
+    // 优先点邮箱表单的 submit；禁止 form.submit()（会绕过 React onSubmit，经典页会 GET 刷新）
     const formSubmitted = await page.evaluate(() => {
-        const form = document.querySelector('form[data-auth-provider="email"]') as HTMLFormElement | null;
+        const provider = document.querySelector('form[data-auth-provider="email"]') as HTMLFormElement | null;
+        let form: HTMLFormElement | null = null;
+        if (provider) {
+            const dialog = provider.closest('dialog') as HTMLDialogElement | null;
+            if (!dialog || dialog.open || dialog.hasAttribute('open')) form = provider;
+        }
+        if (!form) {
+            const email = document.querySelector(
+                '#mobile-auth-email, #email, input[name="email"], input[name="login_hint"], input[type="email"]'
+            ) as HTMLInputElement | null;
+            form = email?.closest('form') as HTMLFormElement | null;
+        }
         if (!form) return false;
-        const dialog = form.closest('dialog') as HTMLDialogElement | null;
-        if (dialog && !(dialog.open || dialog.hasAttribute('open'))) return false;
-        if (typeof form.requestSubmit === 'function') form.requestSubmit();
-        else form.submit();
-        return true;
+        const submit = form.querySelector(
+            'button[type="submit"]:not([disabled]), button.emailButton[type="submit"]:not([disabled])'
+        ) as HTMLButtonElement | null;
+        if (submit) {
+            submit.click();
+            return true;
+        }
+        if (typeof form.requestSubmit === 'function') {
+            form.requestSubmit();
+            return true;
+        }
+        return false;
     }).catch(() => false);
     if (formSubmitted) return;
 
@@ -601,10 +619,39 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
         }
         await evidence(page, 'signup-opened');
         await solveCloudflareIfPresent(page);
+        // 等 React 水合后再填邮箱，避免 Continue 触发原生表单 GET
+        await Utility.waitForFunction(async () => {
+            const ready = await page.evaluate(() => {
+                const email = document.querySelector(
+                    '#mobile-auth-email, #email, input[name="email"], input[name="login_hint"], input[type="email"]'
+                ) as HTMLInputElement | null;
+                if (!email) return null;
+                const form = email.closest('form');
+                if (!form) return null;
+                const dialog = form.closest('dialog') as HTMLDialogElement | null;
+                if (dialog && !(dialog.open || dialog.hasAttribute('open'))) return null;
+                const hydrated = (el: Element) => Object.keys(el).some(key =>
+                    key.startsWith('__reactFiber')
+                    || key.startsWith('__reactProps')
+                    || key.startsWith('__reactInternalInstance'));
+                return (hydrated(form) || hydrated(email)) ? true : null;
+            }).catch(() => null);
+            return ready;
+        }, { pollInterval: 300, timeout: 30_000 }).catch(() => {
+            throw new Error('注册邮箱表单未完成 React 水合，继续提交只会触发原生刷新');
+        });
         const emailInput = await first(page, SIGNUP_EMAIL_SELECTORS);
         if (!emailInput) throw new Error('注册邮箱输入框不可见');
         await emailInput.click({ clickCount: 3 }).catch(() => undefined);
-        await emailInput.type(email);
+        await page.keyboard.press('Backspace').catch(() => undefined);
+        await emailInput.type(email, { delay: 15 });
+        await emailInput.evaluate((el, value) => {
+            const input = el as HTMLInputElement;
+            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+            setter?.call(input, value);
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+        }, email);
         await evidence(page, 'email-entered');
         await clickContinue(page);
         await solveCloudflareIfPresent(page);

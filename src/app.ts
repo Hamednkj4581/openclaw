@@ -296,6 +296,12 @@ async function assertNoChromeNavigationFailure(page: Page): Promise<void> {
     if (message) throw new Error(message);
 }
 
+/** 注册流程误入已有账号登录密码页时立即失败，避免用新密码反复提交 */
+async function assertNotExistingAccountLogin(page: Page): Promise<void> {
+    if (/\/log-in\/password(?:[/?#]|$)/i.test(page.url()))
+        throw new Error('检测到已有 OpenAI 账号的登录密码页：该邮箱已注册；请更换未注册过 OpenAI 的邮箱，或改用登录工作流。');
+}
+
 async function detectState(page: Page): Promise<RegistrationState> {
     const url = page.url();
     // chrome-error / 导航中的 about:blank 上继续查选择器会触发 Puppeteer world 错乱，先短路。
@@ -309,7 +315,9 @@ async function detectState(page: Page): Promise<RegistrationState> {
             if (await youreAllSetOpen(page)) return 'authenticated';
             if (await first(page, AUTHENTICATED_SELECTORS)) return 'authenticated';
         }
-        if (await first(page, ["//input[@type='password' and not(@disabled)]"])) return 'password';
+        // 已有账号登录密码页也有 password 输入框，须先于通用 password 判定
+        if (/\/log-in\/password(?:[/?#]|$)/i.test(url)) return 'password';
+        if (/\/create-account\/password(?:[/?#]|$)/i.test(url) || await first(page, ["//input[@type='password' and not(@disabled)]"])) return 'password';
         if (/\/about-you(?:[/?#]|$)/i.test(url) || await first(page, ["//input[@placeholder='Full name' or @name='name']", "//input[@name='age' or @name='birthday']", "//*[@data-type='month']"])) return 'profile';
         if (/\/mfa-challenge(?:[/?#]|$)/i.test(url) || await first(page, MFA_CHALLENGE_SELECTORS)) return 'mfa-challenge';
         if (await first(page, ["//input[@name='code' or @autocomplete='one-time-code' or @inputmode='numeric']"])) return 'code';
@@ -328,6 +336,7 @@ async function waitForState(page: Page, expected: RegistrationState[], timeoutMs
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
         await assertNoChromeNavigationFailure(page);
+        await assertNotExistingAccountLogin(page);
         const state = await detectState(page);
         if (state === 'mfa-challenge')
             throw new Error('检测到已有 OpenAI 账号的两步验证（2FA）挑战：该邮箱已注册并启用了验证器 MFA，需要原账号的动态验证码；请关闭原账号 2FA 后重试，或更换未注册过 OpenAI 的邮箱。');
@@ -338,10 +347,12 @@ async function waitForState(page: Page, expected: RegistrationState[], timeoutMs
         await solveCloudflareIfPresent(page, 1);
     }
     await assertNoChromeNavigationFailure(page);
+    await assertNotExistingAccountLogin(page);
     return detectState(page);
 }
 
 async function setPasswordIfPresent(page: Page, password: string): Promise<boolean> {
+    await assertNotExistingAccountLogin(page);
     if (await detectState(page) !== 'password') return false;
     await page.type("//input[@type='password' and not(@disabled)]", password);
     await clickContinue(page);
@@ -724,11 +735,19 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
                 // 导航瞬间 XPath 可能短暂失败；若已离开验证码页则跳过填写
                 const codeReady = await Utility.waitForFunction(async () => {
                     const current = await detectState(page);
+                    if (current === 'mfa-challenge')
+                        throw new Error('检测到已有 OpenAI 账号的两步验证（2FA）挑战：该邮箱已注册并启用了验证器 MFA，需要原账号的动态验证码；请关闭原账号 2FA 后重试，或更换未注册过 OpenAI 的邮箱。');
+                    await assertNotExistingAccountLogin(page);
                     if (current === 'password' || current === 'profile' || current === 'authenticated')
                         return { kind: 'advanced' as const };
+                    // 仅匹配邮箱验证码页，避免把 MFA 的 one-time code 当成邮件验证码
+                    if (current !== 'code' && current !== 'email-verification') return null;
                     const input = await first(page, ["//input[@name='code' or @autocomplete='one-time-code' or @inputmode='numeric']"]);
                     return input ? { kind: 'code' as const, input } : null;
-                }, { pollInterval: 300, timeout: 30_000 }).catch(() => null);
+                }, { pollInterval: 300, timeout: 30_000 }).catch(error => {
+                    if (error instanceof Error && /两步验证|已注册/.test(error.message)) throw error;
+                    return null;
+                });
                 if (!codeReady) throw new Error('收到六位验证码，但当前页面没有验证码输入框');
                 if (codeReady.kind === 'code') {
                     await codeReady.input.type(verification.value);

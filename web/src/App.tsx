@@ -142,7 +142,7 @@ export default function App() {
   return (
     <div className="page">
       <header className="hero">
-        <p className="brand">OpenClaw Console</p>
+        <p className="brand">控制台</p>
         <Title level={2} className="hero-title">
           账号处理台
         </Title>

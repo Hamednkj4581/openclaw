@@ -13,7 +13,7 @@ import { credentialsFromEnv, preflightMail, waitForMailVerification } from './ma
 import { installTurnstileHook, solveCloudflareIfPresent, validateCapSolver } from './capsolver.js';
 import { installNetworkCapture } from './networkCapture.js';
 import { buildJapanStickyProxy, buildProxyPacUrl, is711ProxyEnabled, preflightProxy, rotateStickySession } from './proxy.js';
-import { MFA_CHALLENGE_SELECTORS, MFA_CODE_SELECTORS, MFA_ENABLED_SELECTORS, MFA_VERIFY_SELECTORS, SIGNUP_EMAIL_SELECTORS, SIGNUP_SELECTORS } from './selectors.js';
+import { AUTHENTICATED_SELECTORS, CONTINUE_SELECTORS, LOGIN_SELECTORS, MFA_CHALLENGE_SELECTORS, MFA_CODE_SELECTORS, MFA_ENABLED_SELECTORS, MFA_VERIFY_SELECTORS, SIGNUP_EMAIL_SELECTORS, SIGNUP_SELECTORS } from './selectors.js';
 import { cookieFileNameForEmail, writeCookieEditorJson } from './cookieExport.js';
 
 const MAX_TIMEOUT = Math.pow(2, 31) - 1;
@@ -85,12 +85,7 @@ async function first(page: Page, selectors: string[]): Promise<ElementHandle<Ele
 }
 
 async function clickContinue(page: Page): Promise<void> {
-    const button = await first(page, [
-        "//button[normalize-space(.)='Continue' and not(.//*[contains(translate(normalize-space(.), 'GOOGLE', 'google'), 'google')])]",
-        "//button[normalize-space(.)='Finish creating account' and not(@disabled)]",
-        "//button[@data-dd-action-name='Continue' and not(@disabled)]",
-        "//button[@type='submit' and not(@disabled)]"
-    ]);
+    const button = await first(page, CONTINUE_SELECTORS);
     if (!button) throw new Error('找不到可用的非 OAuth Continue/提交按钮');
     const beforeUrl = page.url();
     try {
@@ -210,17 +205,13 @@ async function detectState(page: Page): Promise<RegistrationState> {
     // chrome-error / 导航中的 about:blank 上继续查选择器会触发 Puppeteer world 错乱，先短路。
     if (/^chrome-error:\/\//i.test(url) || /^about:blank$/i.test(url)) return 'unknown';
     try {
-        // 注册弹层仍可能停在 chatgpt.com，且页面上有 textarea/contenteditable；有邮箱输入框时不算已登录。
+        // 未登录 lightweight shell 也有 Ask anything composer；有 Log in/Sign up 或邮箱框时不算已登录。
+        const guestShell = !!(await first(page, LOGIN_SELECTORS) || await first(page, SIGNUP_SELECTORS));
         if (/chatgpt\.com\/(?:\?|$)|chatgpt\.com\/(?:c|g|share)\//i.test(url) && !/auth|login|signup|verify/i.test(url)
-            && !await first(page, SIGNUP_EMAIL_SELECTORS)) {
+            && !guestShell && !await first(page, SIGNUP_EMAIL_SELECTORS)) {
             // 注册完成后的 You're all set 会挡住主界面；出现即表示已登录成功
             if (await youreAllSetOpen(page)) return 'authenticated';
-            if (await first(page, [
-                "//textarea[@id='prompt-textarea' or @name='prompt-textarea' or contains(@placeholder, 'Ask') or contains(@placeholder, 'Message')]",
-                "//*[@contenteditable='true' and (@id='prompt-textarea' or contains(@data-testid, 'composer') or contains(@placeholder, 'Ask') or contains(@placeholder, 'Message'))]",
-                "//button[@data-testid='accounts-profile-button']",
-                "//button[contains(@aria-label, 'profile') or contains(@data-testid, 'profile')]"
-            ])) return 'authenticated';
+            if (await first(page, AUTHENTICATED_SELECTORS)) return 'authenticated';
         }
         if (await first(page, ["//input[@type='password' and not(@disabled)]"])) return 'password';
         if (/\/about-you(?:[/?#]|$)/i.test(url) || await first(page, ["//input[@placeholder='Full name' or @name='name']", "//input[@name='age' or @name='birthday']", "//*[@data-type='month']"])) return 'profile';

@@ -7,8 +7,8 @@ on:
         description: '用于 run-name 的提交主题（非敏感）'
         required: true
         type: string
-      account:
-        description: 'ChatGPT 账号：email----password----2fa（TOTP 密钥）'
+      accounts:
+        description: '多个账号用英文分号 ; 分隔（也兼容换行）：email----password----2fa（可带注册结果尾部字段）'
         required: true
         type: string
       enable_711_proxy:
@@ -32,31 +32,60 @@ env:
   TZ: Asia/Shanghai
 
 jobs:
-  login:
+  prepare-matrix:
     runs-on: ubuntu-latest
+    outputs:
+      ids: ${{ steps.matrix.outputs.ids }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: 校验登录凭据
+      - id: matrix
+        name: 校验登录账号并生成矩阵
         shell: python
         env:
-          ACCOUNT: ${{ inputs.account }}
+          ACCOUNTS: ${{ inputs.accounts }}
+        run: |
+          import json
+          import os
+          import sys
+
+          sys.path.insert(0, '.github/scripts')
+          from account_input import parse_login_accounts
+
+          try:
+              accounts = parse_login_accounts(os.environ['ACCOUNTS'])
+          except ValueError as error:
+              raise SystemExit(str(error)) from None
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write('ids=' + json.dumps(list(range(len(accounts))), separators=(',', ':')) + '\n')
+
+  login:
+    needs: prepare-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 20
+      fail-fast: false
+      matrix:
+        account_index: ${{ fromJson(needs.prepare-matrix.outputs.ids) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 读取登录凭据
+        shell: python
+        env:
+          ACCOUNTS: ${{ inputs.accounts }}
+          ACCOUNT_INDEX: ${{ matrix.account_index }}
         run: |
           import os
-          import re
+          import sys
+
+          sys.path.insert(0, '.github/scripts')
+          from account_input import parse_login_accounts
 
           # 不使用 ::add-mask::：否则 GitHub 会把日志里的 access token 打成 ***；
-          # workflow_dispatch 的 account 输入本身已对有权限者可见。
-          raw = os.environ['ACCOUNT'].strip()
-          fields = [part.strip() for part in re.split(r'-{4,}', raw) if part.strip()]
-          if len(fields) < 3:
-              raise SystemExit('登录账号格式应为 email----password----2fa')
-          email, password, otp = fields[0], fields[1], fields[2]
-          if '@' not in email:
-              raise SystemExit('登录邮箱格式无效')
-          if not password or not otp:
-              raise SystemExit('登录密码或 2FA 为空')
-
+          # workflow_dispatch 的 accounts 输入本身已对有权限者可见。
+          email, password, otp = parse_login_accounts(os.environ['ACCOUNTS'])[int(os.environ['ACCOUNT_INDEX'])]
           login_line = f'{email}----{password}----{otp}'
           with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env_file:
               env_file.write(f'CHATGPT_LOGIN<<__LOGIN_VALUE__\n{login_line}\n__LOGIN_VALUE__\n')
@@ -83,12 +112,16 @@ jobs:
         if: always() && hashFiles('evidence/**') != ''
         uses: actions/upload-artifact@v4
         with:
-          name: login-evidence
+          name: login-evidence-${{ matrix.account_index }}
           path: evidence/
           retention-days: 3
 
+  finalize:
+    needs: login
+    runs-on: ubuntu-latest
+    if: success()
+    steps:
       - name: 尝试删除本次 run（清除日志中的 access token）
-        if: success()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

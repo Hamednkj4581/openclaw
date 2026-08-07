@@ -1,4 +1,4 @@
-/** 解析 email----password----2fa（四个或更多连续连字符分隔） */
+/** 解析 email----password----2fa（四个或更多连续连字符分隔；允许尾部多余字段） */
 export type LoginAccount = { email: string; password: string; otpSecret: string };
 
 export function parseLoginAccount(raw: string): LoginAccount {

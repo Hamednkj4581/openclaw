@@ -12,11 +12,14 @@ import { installTurnstileHook, solveCloudflareIfPresent, validateCapSolver } fro
 import { installNetworkCapture } from './networkCapture.js';
 import { buildJapanStickyProxy, buildProxyPacUrl, is711ProxyEnabled, preflightProxy, rotateStickySession } from './proxy.js';
 import {
+    AUTHENTICATED_SELECTORS,
+    CONTINUE_SELECTORS,
     LOGIN_SELECTORS,
     MFA_CHALLENGE_SELECTORS,
     MFA_CODE_SELECTORS,
     MFA_VERIFY_SELECTORS,
     SIGNUP_EMAIL_SELECTORS,
+    SIGNUP_SELECTORS,
 } from './selectors.js';
 import { parseLoginAccount } from './loginAccount.js';
 
@@ -73,11 +76,7 @@ async function first(page: Page, selectors: string[]): Promise<ElementHandle<Ele
 }
 
 async function clickContinue(page: Page): Promise<void> {
-    const button = await first(page, [
-        "//button[normalize-space(.)='Continue' and not(.//*[contains(translate(normalize-space(.), 'GOOGLE', 'google'), 'google')])]",
-        "//button[@data-dd-action-name='Continue' and not(@disabled)]",
-        "//button[@type='submit' and not(@disabled)]"
-    ]);
+    const button = await first(page, CONTINUE_SELECTORS);
     if (!button) throw new Error('找不到可用的非 OAuth Continue/提交按钮');
     const beforeUrl = page.url();
     try {
@@ -110,14 +109,11 @@ async function detectState(page: Page): Promise<LoginState> {
     const url = page.url();
     if (/^chrome-error:\/\//i.test(url) || /^about:blank$/i.test(url)) return 'unknown';
     try {
+        // 未登录 lightweight shell 也有 Ask anything composer，不能仅凭输入框判定已登录
+        const guestShell = !!(await first(page, LOGIN_SELECTORS) || await first(page, SIGNUP_SELECTORS));
         if (/chatgpt\.com\/(?:\?|$)|chatgpt\.com\/(?:c|g|share)\//i.test(url) && !/auth|login|signup|verify/i.test(url)
-            && !await first(page, SIGNUP_EMAIL_SELECTORS)) {
-            if (await first(page, [
-                "//textarea[@id='prompt-textarea' or @name='prompt-textarea' or contains(@placeholder, 'Ask') or contains(@placeholder, 'Message')]",
-                "//*[@contenteditable='true' and (@id='prompt-textarea' or contains(@data-testid, 'composer') or contains(@placeholder, 'Ask') or contains(@placeholder, 'Message'))]",
-                "//button[@data-testid='accounts-profile-button']",
-                "//button[contains(@aria-label, 'profile') or contains(@data-testid, 'profile')]"
-            ])) return 'authenticated';
+            && !guestShell && !await first(page, SIGNUP_EMAIL_SELECTORS)) {
+            if (await first(page, AUTHENTICATED_SELECTORS)) return 'authenticated';
         }
         if (/\/mfa-challenge(?:[/?#]|$)/i.test(url) || await first(page, MFA_CHALLENGE_SELECTORS)) return 'mfa-challenge';
         if (await first(page, ["//input[@type='password' and not(@disabled)]"])) return 'password';

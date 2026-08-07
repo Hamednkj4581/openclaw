@@ -75,3 +75,31 @@ def resolve_forward_mailbox(forwarding_emails: list[str], mailboxes_text: str) -
     if not fields:
         raise ValueError(f"FORWARD_MAILBOXES 中找不到转发邮箱配置：{target}")
     return fields
+
+
+_BASE32_RE = re.compile(r"^[A-Z2-7=]+$", re.IGNORECASE)
+
+
+def parse_login_accounts(value: str) -> list[list[str]]:
+    """Parse login accounts: email----password----2fa（允许尾部多余字段，如注册结果行）。"""
+    records = [record.strip() for record in ACCOUNT_SEPARATOR.split(value) if record.strip()]
+    if not records:
+        raise ValueError("accounts 输入不能为空")
+
+    accounts: list[list[str]] = []
+    for index, record in enumerate(records, 1):
+        fields = [field.strip() for field in FIELD_SEPARATOR.split(record) if field.strip()]
+        if len(fields) < 3:
+            raise ValueError(
+                f"第 {index} 个登录账号格式错误，必须是 email----password----2fa；"
+                "多个账号请用分号或换行分隔"
+            )
+        email, password, otp = fields[0], fields[1], fields[2].replace(" ", "")
+        if not EMAIL_RE.match(email):
+            raise ValueError(f"第 {index} 个登录邮箱格式错误")
+        if not password:
+            raise ValueError(f"第 {index} 个登录密码为空")
+        if not _BASE32_RE.match(otp):
+            raise ValueError(f"第 {index} 个 2FA 密钥应为 Base32（TOTP secret）")
+        accounts.append([email, password, otp])
+    return accounts

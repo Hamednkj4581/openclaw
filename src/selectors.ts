@@ -18,9 +18,31 @@ export const LOGIN_SELECTORS = [
     "//a[contains(@href, 'login') or contains(@href, 'signin')][not(@aria-disabled='true')]"
 ];
 
-/** 注册/登录弹层邮箱框 */
+/** 注册/登录弹层邮箱框（含新版 lightweight mobile-auth 弹层） */
 export const SIGNUP_EMAIL_SELECTORS = [
+    "//input[@id='mobile-auth-email' and not(@disabled)]",
     "//input[@id='email' or @name='email' or @type='email']"
+];
+
+/**
+ * 非 OAuth 的 Continue/提交按钮。
+ * 必须优先匹配邮箱表单提交，并排除 bottom-sheet 的 Close/Dismiss（它们也是 type=submit）。
+ */
+export const CONTINUE_SELECTORS = [
+    "//form[@data-auth-provider='email']//button[@type='submit' and not(@disabled)]",
+    "//button[contains(@class,'emailButton') and @type='submit' and not(@disabled)]",
+    "//button[normalize-space(.)='Continue' and not(.//*[contains(translate(normalize-space(.), 'GOOGLE', 'google'), 'google')]) and not(@data-auth-provider)]",
+    "//button[normalize-space(.)='Finish creating account' and not(@disabled)]",
+    "//button[@data-dd-action-name='Continue' and not(@disabled)]",
+    "//button[@type='submit' and not(@disabled) and not(@value='close-button') and not(@value='backdrop') and not(@data-bottom-sheet-dismiss-button) and not(@aria-label='Close') and not(@aria-label='Dismiss')]"
+];
+
+/** 已登录主界面（排除未登录 shell 上 placeholder=Ask anything 的游客 composer） */
+export const AUTHENTICATED_SELECTORS = [
+    "//textarea[@id='prompt-textarea' or @name='prompt-textarea']",
+    "//*[@contenteditable='true' and (@id='prompt-textarea' or contains(@data-testid, 'composer'))]",
+    "//button[@data-testid='accounts-profile-button']",
+    "//button[contains(@aria-label, 'profile') or contains(@data-testid, 'profile')]"
 ];
 
 export const MFA_CODE_SELECTORS = [

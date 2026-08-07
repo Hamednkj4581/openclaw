@@ -269,13 +269,8 @@ def run_deploy(cf_token: str, account_id: str) -> str:
     if code != 0:
         raise SystemExit(f"wrangler pages deploy 失败：\n{output}")
 
-    stable = f"https://{PROJECT_NAME}.pages.dev"
-    if stable in output or re.search(rf"https://{re.escape(PROJECT_NAME)}\.pages\.dev", output):
-        return stable
-    match = re.search(r"https://[a-zA-Z0-9.-]+\.pages\.dev", output)
-    if match:
-        return match.group(0).rstrip("/")
-    return stable
+    # 回调始终用生产域名，避免每次部署的预览子域把 WEB_CALLBACK_URL 改乱
+    return f"https://{PROJECT_NAME}.pages.dev"
 
 
 def resolve_account_id(cf_token: str) -> str:

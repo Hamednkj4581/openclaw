@@ -20,17 +20,29 @@ import './App.css';
 const { Title, Paragraph, Text } = Typography;
 const { TextArea } = Input;
 
+const FORWARDING_EMAIL_OPTIONS = [{ value: 'TimmothyBegan9059@hotmail.com', label: 'TimmothyBegan9059@hotmail.com' }];
+
+/** 代理地区：none=直连；后续可扩展更多地区码 */
+const PROXY_REGION_OPTIONS = [
+  { value: 'none', label: '直连（不使用代理）' },
+  { value: 'JP', label: '日本' },
+];
+
 interface RegisterForm {
   accounts: string;
   forwarding_emails: string;
   enable_mfa: boolean;
-  enable_711_proxy: boolean;
+  proxy_region: string;
   payment_link_type: string;
 }
 
 interface LoginForm {
   accounts: string;
-  enable_711_proxy: boolean;
+  proxy_region: string;
+}
+
+function isProxyEnabled(region: string | undefined): boolean {
+  return Boolean(region && region !== 'none');
 }
 
 const phasePercent: Record<TaskStatus['phase'], number> = {
@@ -91,7 +103,7 @@ export default function App() {
         accounts: values.accounts,
         forwarding_emails: values.forwarding_emails,
         enable_mfa: values.enable_mfa,
-        enable_711_proxy: values.enable_711_proxy,
+        enable_711_proxy: isProxyEnabled(values.proxy_region),
         payment_link_type: values.payment_link_type,
       });
       setTaskId(result.taskId);
@@ -110,7 +122,7 @@ export default function App() {
       const result = await triggerTask({
         mode: 'login',
         accounts: values.accounts,
-        enable_711_proxy: values.enable_711_proxy,
+        enable_711_proxy: isProxyEnabled(values.proxy_region),
       });
       setTaskId(result.taskId);
       setStatus(null);
@@ -158,9 +170,9 @@ export default function App() {
             layout="vertical"
             className="task-form"
             initialValues={{
-              forwarding_emails: 'TimmothyBegan9059@hotmail.com',
+              forwarding_emails: FORWARDING_EMAIL_OPTIONS[0].value,
               enable_mfa: true,
-              enable_711_proxy: false,
+              proxy_region: 'none',
               payment_link_type: '未选择',
             }}
             onFinish={onSubmitRegister}
@@ -173,15 +185,20 @@ export default function App() {
             >
               <TextArea rows={6} placeholder={'email@example.com\n或 email----password----client_id----refresh_token'} />
             </Form.Item>
-            <Form.Item label="转发邮箱" name="forwarding_emails">
-              <Input placeholder="单邮箱账号时使用" />
+            <Form.Item
+              label="转发邮箱"
+              name="forwarding_emails"
+              extra="单邮箱账号时使用"
+              rules={[{ required: true, message: '请选择转发邮箱' }]}
+            >
+              <Select options={FORWARDING_EMAIL_OPTIONS} />
             </Form.Item>
             <Space size="large" wrap className="switches">
               <Form.Item label="开启两步验证" name="enable_mfa" valuePropName="checked">
                 <Switch />
               </Form.Item>
-              <Form.Item label="启用代理" name="enable_711_proxy" valuePropName="checked">
-                <Switch />
+              <Form.Item label="代理地区" name="proxy_region" rules={[{ required: true, message: '请选择代理地区' }]}>
+                <Select style={{ width: 200 }} options={PROXY_REGION_OPTIONS} />
               </Form.Item>
               <Form.Item label="支付提链" name="payment_link_type">
                 <Select
@@ -202,7 +219,7 @@ export default function App() {
             form={loginForm}
             layout="vertical"
             className="task-form"
-            initialValues={{ enable_711_proxy: false }}
+            initialValues={{ proxy_region: 'none' }}
             onFinish={onSubmitLogin}
           >
             <Form.Item
@@ -213,8 +230,8 @@ export default function App() {
             >
               <TextArea rows={6} placeholder="email----password----2fa" />
             </Form.Item>
-            <Form.Item label="启用代理" name="enable_711_proxy" valuePropName="checked">
-              <Switch />
+            <Form.Item label="代理地区" name="proxy_region" rules={[{ required: true, message: '请选择代理地区' }]}>
+              <Select style={{ width: 200 }} options={PROXY_REGION_OPTIONS} />
             </Form.Item>
             <Button type="primary" htmlType="submit" icon={<PlayCircleOutlined />} loading={submitting} size="large">
               开始登录

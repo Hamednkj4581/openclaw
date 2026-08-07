@@ -21,6 +21,14 @@ on:
         required: false
         default: true
         type: boolean
+      payment_link_type:
+        description: '支付提链类型（选 gcash 时在汇总阶段检查 zero trial）'
+        required: false
+        default: '未选择'
+        type: choice
+        options:
+          - 未选择
+          - gcash
 
 # workflow_dispatch 无 head_commit，用显式输入作为运行名
 run-name: ${{ inputs.commit_message }}
@@ -165,6 +173,8 @@ jobs:
     if: always()
     needs: register
     steps:
+      - uses: actions/checkout@v4
+
       - name: 下载所有账号结果
         continue-on-error: true
         uses: actions/download-artifact@v4
@@ -172,19 +182,21 @@ jobs:
           pattern: step-summary-*
           path: summaries
 
-      - name: 合并结果
+      - name: 合并结果并处理支付提链
         shell: python
-        run: |
-          import os
-          from pathlib import Path
+        env:
+          SUMMARIES_DIR: summaries
+          PAYMENT_LINK_TYPE: ${{ inputs.payment_link_type }}
+        run: python .github/scripts/collect_payment_summary.py
 
-          results = []
-          for path in sorted(Path('summaries').rglob('step-summary')):
-              if path.is_file():
-                  for line in path.read_text(encoding='utf-8').splitlines():
-                      if line.strip():
-                          results.append(line.strip())
-
-          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
-              if results:
-                  summary.write('\n'.join(results) + '\n')
+      - name: 上传支付汇总产物
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: payment-summary
+          path: |
+            all-access-tokens.txt
+            web-summary.txt
+            zero-trial-tokens.txt
+          if-no-files-found: ignore
+          retention-days: 7

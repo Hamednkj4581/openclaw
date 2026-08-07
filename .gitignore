@@ -10,3 +10,10 @@ __pycache__/
 /forward_mailboxes.txt
 /测试邮箱.txt
 /PAT
+/CLOUDFLARE_API_TOKEN
+/WEBHOOK_SECRET
+/web/node_modules/
+/web/dist/
+/web/.dev.vars
+/web/.wrangler/
+/web/package-lock.json

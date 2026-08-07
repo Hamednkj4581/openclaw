@@ -1,0 +1,37 @@
+@import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&display=swap');
+
+:root {
+  color-scheme: light;
+  --bg0: #ecf4f1;
+  --bg1: #d7ebe4;
+  --ink: #12302c;
+  --muted: #4b6b66;
+  --card: rgba(255, 255, 255, 0.82);
+  --line: rgba(15, 118, 110, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  font-family: 'Source Sans 3', 'Noto Sans SC', 'Segoe UI', sans-serif;
+  background:
+    radial-gradient(1200px 600px at 10% -10%, #b7e4d8 0%, transparent 55%),
+    radial-gradient(900px 500px at 100% 0%, #cfe7f2 0%, transparent 50%),
+    linear-gradient(160deg, var(--bg0), var(--bg1));
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}

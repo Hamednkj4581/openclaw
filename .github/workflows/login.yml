@@ -16,6 +16,11 @@ on:
         required: false
         default: false
         type: boolean
+      web_task_id:
+        description: '网页控制台任务 ID（有值时回传进度与 access token）'
+        required: false
+        default: ''
+        type: string
 
 # workflow_dispatch 无 head_commit，用显式输入作为运行名
 run-name: ${{ inputs.commit_message }}
@@ -36,6 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       ids: ${{ steps.matrix.outputs.ids }}
+      total: ${{ steps.matrix.outputs.total }}
     steps:
       - uses: actions/checkout@v4
 
@@ -59,6 +65,18 @@ jobs:
 
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
               output.write('ids=' + json.dumps(list(range(len(accounts))), separators=(',', ':')) + '\n')
+              output.write(f'total={len(accounts)}\n')
+
+      - name: 通知网页控制台已开始
+        if: ${{ inputs.web_task_id != '' }}
+        continue-on-error: true
+        env:
+          WEB_TASK_ID: ${{ inputs.web_task_id }}
+          WEB_CALLBACK_URL: ${{ secrets.WEB_CALLBACK_URL }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+          WEB_EVENT: started
+          WEB_TOTAL: ${{ steps.matrix.outputs.total }}
+        run: python .github/scripts/web_callback.py
 
   login:
     needs: prepare-matrix
@@ -89,8 +107,10 @@ jobs:
           login_line = f'{email}----{password}----{otp}'
           with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env_file:
               env_file.write(f'CHATGPT_LOGIN<<__LOGIN_VALUE__\n{login_line}\n__LOGIN_VALUE__\n')
+              env_file.write(f'LOGIN_EMAIL<<__EMAIL_VALUE__\n{email}\n__EMAIL_VALUE__\n')
 
       - name: 构建并执行 ChatGPT 登录
+        id: login-run
         env:
           ENABLE_711_PROXY: ${{ inputs.enable_711_proxy }}
           CAPSOLVER_API_KEY: ${{ secrets.CAPSOLVER_API_KEY }}
@@ -107,6 +127,20 @@ jobs:
           npm run build:login
           # 登录 + 打印 token + 等待 10 分钟，预留缓冲
           timeout -k 30s 900s node dist/login.js
+
+      - name: 通知网页控制台账号结果
+        if: ${{ always() && inputs.web_task_id != '' }}
+        continue-on-error: true
+        env:
+          WEB_TASK_ID: ${{ inputs.web_task_id }}
+          WEB_CALLBACK_URL: ${{ secrets.WEB_CALLBACK_URL }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+          WEB_EVENT: account_done
+          WEB_ACCOUNT_INDEX: ${{ matrix.account_index }}
+          WEB_ACCOUNT_EMAIL: ${{ env.LOGIN_EMAIL }}
+          WEB_ACCOUNT_OK: ${{ steps.login-run.outcome == 'success' }}
+          WEB_ACCOUNT_ERROR: 登录失败
+        run: python .github/scripts/web_callback.py
 
       - name: 上传 access token 产物
         if: success()
@@ -130,9 +164,23 @@ jobs:
   finalize:
     needs: login
     runs-on: ubuntu-latest
-    if: success()
+    if: always()
     steps:
+      - uses: actions/checkout@v4
+
+      - name: 通知网页控制台任务结束
+        if: ${{ inputs.web_task_id != '' }}
+        continue-on-error: true
+        env:
+          WEB_TASK_ID: ${{ inputs.web_task_id }}
+          WEB_CALLBACK_URL: ${{ secrets.WEB_CALLBACK_URL }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+          WEB_EVENT: finished
+          WEB_FINISHED_OK: ${{ needs.login.result == 'success' }}
+        run: python .github/scripts/web_callback.py
+
       - name: 尝试删除本次 run（清除日志中的 access token）
+        if: success() && needs.login.result == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

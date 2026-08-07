@@ -183,7 +183,6 @@ jobs:
           path: summaries
 
       - name: 合并结果并处理支付提链
-        shell: python
         env:
           SUMMARIES_DIR: summaries
           PAYMENT_LINK_TYPE: ${{ inputs.payment_link_type }}

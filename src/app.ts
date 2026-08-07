@@ -85,9 +85,21 @@ async function first(page: Page, selectors: string[]): Promise<ElementHandle<Ele
 }
 
 async function clickContinue(page: Page): Promise<void> {
+    const beforeUrl = page.url();
+    // lightweight auth 邮箱表单：用 requestSubmit，避免坐标点偏/点到关闭层
+    const formSubmitted = await page.evaluate(() => {
+        const form = document.querySelector('form[data-auth-provider="email"]') as HTMLFormElement | null;
+        if (!form) return false;
+        const dialog = form.closest('dialog') as HTMLDialogElement | null;
+        if (dialog && !(dialog.open || dialog.hasAttribute('open'))) return false;
+        if (typeof form.requestSubmit === 'function') form.requestSubmit();
+        else form.submit();
+        return true;
+    }).catch(() => false);
+    if (formSubmitted) return;
+
     const button = await first(page, CONTINUE_SELECTORS);
     if (!button) throw new Error('找不到可用的非 OAuth Continue/提交按钮');
-    const beforeUrl = page.url();
     try {
         // 坐标点击，避免导航销毁上下文时 ElementHandle.click 触发 world 错乱
         const box = await button.boundingBox();
@@ -106,28 +118,6 @@ async function clickContinue(page: Page): Promise<void> {
 async function openSignup(page: Page): Promise<void> {
     if (await first(page, SIGNUP_EMAIL_SELECTORS)) return;
 
-    const openAuthDialog = async (): Promise<boolean> => {
-        const opened = await page.evaluate(() => {
-            const dialog = document.getElementById('mobile-auth-dialog') as HTMLDialogElement | null;
-            if (!dialog) return false;
-            if (!dialog.open) {
-                if (typeof dialog.showModal === 'function') dialog.showModal();
-                else dialog.setAttribute('open', '');
-            }
-            return dialog.open || dialog.hasAttribute('open');
-        }).catch(() => false);
-        if (opened && await first(page, SIGNUP_EMAIL_SELECTORS)) return true;
-
-        const button = await first(page, SIGNUP_SELECTORS);
-        if (!button) return false;
-        await button.evaluate(el => el.scrollIntoView({ block: 'center', inline: 'center' }));
-        // 只点一次：show-modal 二次点击会关闭弹层
-        const box = await button.boundingBox();
-        if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-        else await button.evaluate(el => (el as HTMLElement).click());
-        return true;
-    };
-
     const deadline = Date.now() + 60_000;
     let lastError = '';
     while (Date.now() < deadline) {
@@ -136,12 +126,19 @@ async function openSignup(page: Page): Promise<void> {
         if (await first(page, SIGNUP_EMAIL_SELECTORS)) return;
         await solveCloudflareIfPresent(page, 1);
 
+        const button = await first(page, SIGNUP_SELECTORS);
+        if (!button) {
+            lastError = '未找到 Sign up 按钮';
+            await Utility.waitForSeconds(0.5);
+            continue;
+        }
+
         try {
-            if (!await openAuthDialog()) {
-                lastError = '未找到 Sign up 按钮或注册弹层';
-                await Utility.waitForSeconds(0.5);
-                continue;
-            }
+            // 必须点入口按钮以初始化 bottom-sheet；只点一次避免 show-modal 开/关切换
+            await button.evaluate(el => el.scrollIntoView({ block: 'center', inline: 'center' }));
+            const box = await button.boundingBox();
+            if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+            else await button.evaluate(el => (el as HTMLElement).click());
         } catch (error) {
             lastError = error instanceof Error ? error.message : String(error);
             await Utility.waitForSeconds(0.5);
@@ -156,7 +153,7 @@ async function openSignup(page: Page): Promise<void> {
             { pollInterval: 400, timeout: 8_000 }
         ).catch(() => null);
         if (opened) return;
-        lastError = '已尝试打开注册弹层，但邮箱输入框未出现';
+        lastError = '已点击 Sign up，但邮箱输入框未出现';
     }
 
     await assertNoChromeNavigationFailure(page);

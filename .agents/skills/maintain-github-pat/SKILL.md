@@ -9,6 +9,7 @@ description: 维护本仓库 GitHub PAT 的读取、校验与安全使用。在�
 
 - PAT 位于仓库根目录的 `PAT` 文件（整文件内容即为 token，通常一行）；该文件必须保持未跟踪。
 - 仅用于触发和查询 GitHub Actions、必要时推送，以及需要仓库 API 鉴权的维护操作。
+- Actions 相关操作走 `github-actions-rest`（PAT + REST）；**禁止先试 `gh`**（本环境不可用）。
 - 不得输出完整 PAT、不得提交、不得写入 remote URL 持久配置、不得复制到其他文件或日志。
 
 ## 硬性禁止

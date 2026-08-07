@@ -146,9 +146,6 @@ export default function App() {
         <Title level={2} className="hero-title">
           账号处理台
         </Title>
-        <Paragraph className="hero-desc">
-          填写邮箱与选项后提交，页面只显示处理进度与结果，不暴露底层细节。
-        </Paragraph>
       </header>
 
       <Card className="panel" bordered={false}>

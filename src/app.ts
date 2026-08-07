@@ -74,11 +74,17 @@ async function captureErrorEvidence(browser: Browser) {
 
 async function first(page: Page, selectors: string[]): Promise<ElementHandle<Element> | null> {
     for (const selector of selectors) {
-        // 同一选择器可能命中隐藏副本（如侧栏悬停卡片），只返回可见元素
-        const elements = await page.mainFrame().$$(selector) as ElementHandle<Element>[];
-        for (const element of elements) {
-            if (await element.isVisible().catch(() => false))
-                return element;
+        try {
+            // 同一选择器可能命中隐藏副本（如侧栏悬停卡片），只返回可见元素
+            const elements = await page.mainFrame().$$(selector) as ElementHandle<Element>[];
+            for (const element of elements) {
+                if (await element.isVisible().catch(() => false))
+                    return element;
+            }
+        } catch (error) {
+            // 导航瞬间 XPath 上下文失效，换下一选择器或交由上层轮询
+            if (Utility.isStaleExecutionContextError(error)) continue;
+            throw error;
         }
     }
     return null;
@@ -164,9 +170,8 @@ async function clickContinue(page: Page): Promise<void> {
         if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
         else await button.evaluate(el => (el as HTMLElement).click());
     } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
         const navigatedAway = page.url() !== beforeUrl;
-        if (navigatedAway && /same JavaScript world|Execution context was destroyed|Target closed|detached/i.test(message))
+        if (navigatedAway && Utility.isStaleExecutionContextError(error))
             return;
         throw error;
     }
@@ -312,8 +317,8 @@ async function detectState(page: Page): Promise<RegistrationState> {
         if (await first(page, SIGNUP_EMAIL_SELECTORS)) return 'email';
         return 'unknown';
     } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (/same JavaScript world|Execution context was destroyed|Target closed|detached/i.test(message))
+        // 提交后导航时 XPath 会抛 Cannot find context，当作未知态继续轮询
+        if (Utility.isStaleExecutionContextError(error))
             return 'unknown';
         throw error;
     }
@@ -716,10 +721,19 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
                 await page.goto(verification.value);
                 await solveCloudflareIfPresent(page);
             } else {
-                const codeInput = await first(page, ["//input[@name='code' or @autocomplete='one-time-code' or @inputmode='numeric']"]);
-                if (!codeInput) throw new Error('收到六位验证码，但当前页面没有验证码输入框');
-                await codeInput.type(verification.value);
-                await clickContinue(page);
+                // 导航瞬间 XPath 可能短暂失败；若已离开验证码页则跳过填写
+                const codeReady = await Utility.waitForFunction(async () => {
+                    const current = await detectState(page);
+                    if (current === 'password' || current === 'profile' || current === 'authenticated')
+                        return { kind: 'advanced' as const };
+                    const input = await first(page, ["//input[@name='code' or @autocomplete='one-time-code' or @inputmode='numeric']"]);
+                    return input ? { kind: 'code' as const, input } : null;
+                }, { pollInterval: 300, timeout: 30_000 }).catch(() => null);
+                if (!codeReady) throw new Error('收到六位验证码，但当前页面没有验证码输入框');
+                if (codeReady.kind === 'code') {
+                    await codeReady.input.type(verification.value);
+                    await clickContinue(page);
+                }
             }
             state = await waitForState(page, ['password', 'profile', 'authenticated']);
             await evidence(page, `after-verification-${state}`);

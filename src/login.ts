@@ -66,10 +66,15 @@ async function captureErrorEvidence(browser: Browser) {
 
 async function first(page: Page, selectors: string[]): Promise<ElementHandle<Element> | null> {
     for (const selector of selectors) {
-        const elements = await page.mainFrame().$$(selector) as ElementHandle<Element>[];
-        for (const element of elements) {
-            if (await element.isVisible().catch(() => false))
-                return element;
+        try {
+            const elements = await page.mainFrame().$$(selector) as ElementHandle<Element>[];
+            for (const element of elements) {
+                if (await element.isVisible().catch(() => false))
+                    return element;
+            }
+        } catch (error) {
+            if (Utility.isStaleExecutionContextError(error)) continue;
+            throw error;
         }
     }
     return null;
@@ -154,8 +159,7 @@ async function clickContinue(page: Page): Promise<void> {
         if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
         else await button.evaluate(el => (el as HTMLElement).click());
     } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (page.url() !== beforeUrl && /same JavaScript world|Execution context was destroyed|Target closed|detached/i.test(message))
+        if (page.url() !== beforeUrl && Utility.isStaleExecutionContextError(error))
             return;
         throw error;
     }
@@ -211,8 +215,7 @@ async function detectState(page: Page): Promise<LoginState> {
         if (await first(page, SIGNUP_EMAIL_SELECTORS)) return 'email';
         return 'unknown';
     } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (/same JavaScript world|Execution context was destroyed|Target closed|detached/i.test(message))
+        if (Utility.isStaleExecutionContextError(error))
             return 'unknown';
         throw error;
     }

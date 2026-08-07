@@ -245,7 +245,13 @@ Frame.prototype.$$ = async function <Selector extends string>(
     if (options?.timeout)
         await this.waitForSelector(selector, options);
 
-    return $$.call(this, selector.startsWith("xpath=") ? selector : `xpath=${selector}`, options);
+    try {
+        return await $$.call(this, selector.startsWith("xpath=") ? selector : `xpath=${selector}`, options);
+    } catch (e) {
+        // 导航销毁 execution context 时 XPath queryAll 会抛 ProtocolError，当作未命中
+        if (Utility.isStaleExecutionContextError(e)) return [];
+        throw e;
+    }
 };
 
 Frame.prototype.$x = function <Selector extends string>(

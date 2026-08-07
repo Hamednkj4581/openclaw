@@ -3,6 +3,12 @@ import { Mouse, Page } from "puppeteer";
 import logger from './logger.js';
 
 export default class Utility {
+    /** 页面导航/iframe 销毁时 Puppeteer XPath 常见瞬时错误，应重试而非中断流程 */
+    static isStaleExecutionContextError(error: unknown): boolean {
+        const message = error instanceof Error ? error.message : String(error);
+        return /same JavaScript world|Execution context was destroyed|Cannot find context with specified id|Target closed|detached/i.test(message);
+    }
+
     static async waitForSeconds(delay: number) {
         return new Promise((resolve, reject) => {
             setTimeout(() => {

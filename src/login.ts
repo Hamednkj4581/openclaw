@@ -143,6 +143,29 @@ async function waitForState(page: Page, expected: LoginState[], timeoutMs = 60_0
 async function openLogin(page: Page): Promise<void> {
     if (await first(page, SIGNUP_EMAIL_SELECTORS)) return;
 
+    const openAuthDialog = async (): Promise<boolean> => {
+        // lightweight shell：直接 showModal，避免 command=show-modal 连点变成开/关切换
+        const opened = await page.evaluate(() => {
+            const dialog = document.getElementById('mobile-auth-dialog') as HTMLDialogElement | null;
+            if (!dialog) return false;
+            if (!dialog.open) {
+                if (typeof dialog.showModal === 'function') dialog.showModal();
+                else dialog.setAttribute('open', '');
+            }
+            return dialog.open || dialog.hasAttribute('open');
+        }).catch(() => false);
+        if (opened && await first(page, SIGNUP_EMAIL_SELECTORS)) return true;
+
+        const button = await first(page, LOGIN_SELECTORS);
+        if (!button) return false;
+        await button.evaluate(el => el.scrollIntoView({ block: 'center', inline: 'center' }));
+        // 只点一次：show-modal 二次点击会关闭弹层
+        const box = await button.boundingBox();
+        if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+        else await button.evaluate(el => (el as HTMLElement).click());
+        return true;
+    };
+
     const deadline = Date.now() + 60_000;
     let lastError = '';
     while (Date.now() < deadline) {
@@ -150,18 +173,12 @@ async function openLogin(page: Page): Promise<void> {
         if (await first(page, SIGNUP_EMAIL_SELECTORS)) return;
         await solveCloudflareIfPresent(page, 1);
 
-        const button = await first(page, LOGIN_SELECTORS);
-        if (!button) {
-            lastError = '未找到 Log in 按钮';
-            await Utility.waitForSeconds(0.5);
-            continue;
-        }
-
         try {
-            await button.evaluate(el => el.scrollIntoView({ block: 'center', inline: 'center' }));
-            const box = await button.boundingBox();
-            if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-            await button.evaluate(el => (el as HTMLElement).click());
+            if (!await openAuthDialog()) {
+                lastError = '未找到 Log in 按钮或登录弹层';
+                await Utility.waitForSeconds(0.5);
+                continue;
+            }
         } catch (error) {
             lastError = error instanceof Error ? error.message : String(error);
             await Utility.waitForSeconds(0.5);
@@ -176,8 +193,17 @@ async function openLogin(page: Page): Promise<void> {
             { pollInterval: 400, timeout: 8_000 }
         ).catch(() => null);
         if (opened) return;
-        lastError = '已点击 Log in，但邮箱输入框未出现';
+        lastError = '已尝试打开登录弹层，但邮箱输入框未出现';
     }
+
+    // 弹层路径失败时走经典登录页，避免卡在游客 shell
+    await page.goto('https://chatgpt.com/auth/login', { waitUntil: 'domcontentloaded', timeout: 60_000, retries: 2 });
+    await solveCloudflareIfPresent(page);
+    const emailOnAuth = await Utility.waitForFunction(
+        () => first(page, SIGNUP_EMAIL_SELECTORS),
+        { pollInterval: 400, timeout: 20_000 }
+    ).catch(() => null);
+    if (emailOnAuth) return;
 
     await assertNoChromeNavigationFailure(page);
     throw new Error(`打开 ChatGPT 登录入口超时（${lastError || '未知'}），URL：${page.url().replace(/[?#].*$/, '')}`);
@@ -303,7 +329,10 @@ async function extractAccessToken(page: Page): Promise<string> {
         await solveCloudflareIfPresent(page);
         await openLogin(page);
         await evidence(page, 'login-opened');
-        await page.type(SIGNUP_EMAIL_SELECTORS[0], account.email, { timeout: 60_000 });
+        const emailInput = await first(page, SIGNUP_EMAIL_SELECTORS);
+        if (!emailInput) throw new Error('登录邮箱输入框不可见');
+        await emailInput.click({ clickCount: 3 }).catch(() => undefined);
+        await emailInput.type(account.email);
         await evidence(page, 'email-entered');
         await clickContinue(page);
         await solveCloudflareIfPresent(page);

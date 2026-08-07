@@ -106,6 +106,28 @@ async function clickContinue(page: Page): Promise<void> {
 async function openSignup(page: Page): Promise<void> {
     if (await first(page, SIGNUP_EMAIL_SELECTORS)) return;
 
+    const openAuthDialog = async (): Promise<boolean> => {
+        const opened = await page.evaluate(() => {
+            const dialog = document.getElementById('mobile-auth-dialog') as HTMLDialogElement | null;
+            if (!dialog) return false;
+            if (!dialog.open) {
+                if (typeof dialog.showModal === 'function') dialog.showModal();
+                else dialog.setAttribute('open', '');
+            }
+            return dialog.open || dialog.hasAttribute('open');
+        }).catch(() => false);
+        if (opened && await first(page, SIGNUP_EMAIL_SELECTORS)) return true;
+
+        const button = await first(page, SIGNUP_SELECTORS);
+        if (!button) return false;
+        await button.evaluate(el => el.scrollIntoView({ block: 'center', inline: 'center' }));
+        // 只点一次：show-modal 二次点击会关闭弹层
+        const box = await button.boundingBox();
+        if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+        else await button.evaluate(el => (el as HTMLElement).click());
+        return true;
+    };
+
     const deadline = Date.now() + 60_000;
     let lastError = '';
     while (Date.now() < deadline) {
@@ -114,19 +136,12 @@ async function openSignup(page: Page): Promise<void> {
         if (await first(page, SIGNUP_EMAIL_SELECTORS)) return;
         await solveCloudflareIfPresent(page, 1);
 
-        const button = await first(page, SIGNUP_SELECTORS);
-        if (!button) {
-            lastError = '未找到 Sign up 按钮';
-            await Utility.waitForSeconds(0.5);
-            continue;
-        }
-
         try {
-            await button.evaluate(el => el.scrollIntoView({ block: 'center', inline: 'center' }));
-            const box = await button.boundingBox();
-            // 坐标点击 + DOM click：证据显示仅坐标时偶发无 auth 请求
-            if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-            await button.evaluate(el => (el as HTMLElement).click());
+            if (!await openAuthDialog()) {
+                lastError = '未找到 Sign up 按钮或注册弹层';
+                await Utility.waitForSeconds(0.5);
+                continue;
+            }
         } catch (error) {
             lastError = error instanceof Error ? error.message : String(error);
             await Utility.waitForSeconds(0.5);
@@ -141,7 +156,7 @@ async function openSignup(page: Page): Promise<void> {
             { pollInterval: 400, timeout: 8_000 }
         ).catch(() => null);
         if (opened) return;
-        lastError = '已点击 Sign up，但邮箱输入框未出现';
+        lastError = '已尝试打开注册弹层，但邮箱输入框未出现';
     }
 
     await assertNoChromeNavigationFailure(page);
@@ -589,7 +604,10 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
         }
         await evidence(page, 'signup-opened');
         await solveCloudflareIfPresent(page);
-        await page.type(SIGNUP_EMAIL_SELECTORS[0], email, { timeout: 60_000 });
+        const emailInput = await first(page, SIGNUP_EMAIL_SELECTORS);
+        if (!emailInput) throw new Error('注册邮箱输入框不可见');
+        await emailInput.click({ clickCount: 3 }).catch(() => undefined);
+        await emailInput.type(email);
         await evidence(page, 'email-entered');
         await clickContinue(page);
         await solveCloudflareIfPresent(page);

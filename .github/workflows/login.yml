@@ -37,7 +37,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 读取并保护登录凭据
+      - name: 校验登录凭据
         shell: python
         env:
           ACCOUNT: ${{ inputs.account }}
@@ -45,6 +45,8 @@ jobs:
           import os
           import re
 
+          # 不使用 ::add-mask::：否则 GitHub 会把日志里的 access token 打成 ***；
+          # workflow_dispatch 的 account 输入本身已对有权限者可见。
           raw = os.environ['ACCOUNT'].strip()
           fields = [part.strip() for part in re.split(r'-{4,}', raw) if part.strip()]
           if len(fields) < 3:
@@ -52,18 +54,11 @@ jobs:
           email, password, otp = fields[0], fields[1], fields[2]
           if '@' not in email:
               raise SystemExit('登录邮箱格式无效')
+          if not password or not otp:
+              raise SystemExit('登录密码或 2FA 为空')
 
+          login_line = f'{email}----{password}----{otp}'
           with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env_file:
-              for name, value in (
-                  ('CHATGPT_LOGIN_EMAIL', email),
-                  ('CHATGPT_LOGIN_PASSWORD', password),
-                  ('CHATGPT_LOGIN_OTP', otp),
-              ):
-                  print(f'::add-mask::{value}')
-                  env_file.write(f'{name}<<__LOGIN_VALUE__\n{value}\n__LOGIN_VALUE__\n')
-              # 拼回完整输入供 node 解析；整行也掩码，避免日志回显密码/2FA
-              login_line = f'{email}----{password}----{otp}'
-              print(f'::add-mask::{login_line}')
               env_file.write(f'CHATGPT_LOGIN<<__LOGIN_VALUE__\n{login_line}\n__LOGIN_VALUE__\n')
 
       - name: 构建并执行 ChatGPT 登录

@@ -35,10 +35,6 @@ on:
 # workflow_dispatch 无 head_commit，用显式输入作为运行名
 run-name: ${{ inputs.commit_message }}
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
   actions: write
@@ -50,7 +46,7 @@ jobs:
   prepare-matrix:
     runs-on: ubuntu-latest
     outputs:
-      ids: ${{ steps.matrix.outputs.ids }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
       total: ${{ steps.matrix.outputs.total }}
     steps:
       - uses: actions/checkout@v4
@@ -73,8 +69,13 @@ jobs:
           except ValueError as error:
               raise SystemExit(str(error)) from None
 
+          # 矩阵带邮箱，供 login job 按邮箱做 concurrency
+          items = [
+              {'account_index': index, 'email': account[0].strip().lower()}
+              for index, account in enumerate(accounts)
+          ]
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
-              output.write('ids=' + json.dumps(list(range(len(accounts))), separators=(',', ':')) + '\n')
+              output.write('matrix=' + json.dumps(items, separators=(',', ':')) + '\n')
               output.write(f'total={len(accounts)}\n')
 
       - name: 通知网页控制台已开始
@@ -91,11 +92,15 @@ jobs:
   login:
     needs: prepare-matrix
     runs-on: ubuntu-latest
+    # 同邮箱互斥；不同邮箱可并行（跨 run 也生效）
+    concurrency:
+      group: chatgpt-login-${{ matrix.email }}
+      cancel-in-progress: true
     strategy:
       max-parallel: 20
       fail-fast: false
       matrix:
-        account_index: ${{ fromJson(needs.prepare-matrix.outputs.ids) }}
+        include: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
 

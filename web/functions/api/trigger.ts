@@ -54,29 +54,30 @@ function validateLoginAccounts(accounts: string, label: string): string | null {
   if (!records.length) return `请填写${label}账号`;
   for (let index = 0; index < records.length; index++) {
     const fields = records[index].split(/-{4,}/).map((part) => part.trim()).filter(Boolean);
-    if (fields.length < 3) {
-      return `第 ${index + 1} 个账号格式错误，至少须为 email----password----2fa 或取件字段`;
-    }
-    const [email, password] = fields;
-    if (!LOGIN_ACCOUNT_RE.test(email)) {
+    if (!fields.length) return `第 ${index + 1} 个账号为空`;
+    if (!LOGIN_ACCOUNT_RE.test(fields[0])) {
       return `第 ${index + 1} 个账号邮箱格式无效`;
     }
-    if (!password) return `第 ${index + 1} 个账号密码为空`;
-
-    if (fields.length >= 5) {
-      if (isBase32Field(fields[2])) continue;
-      if (!isBase32Field(fields[4])) {
-        return `第 ${index + 1} 个账号第五段应为 Base32 2FA 密钥`;
-      }
+    if (fields.length === 1) continue;
+    if (fields.length === 2) {
+      if (!fields[1]) return `第 ${index + 1} 个取件字段为空`;
       continue;
     }
     if (fields.length === 4) {
       const third = fields[2];
       const fourth = fields[3];
-      if (isBase32Field(third)) continue;
-      if (isBase32Field(fourth)) continue;
-      if (!fields[2] || !fields[3]) {
-        return `第 ${index + 1} 个账号 Outlook 取件须为 client_id 与 refresh_token`;
+      if (isBase32Field(third) || isBase32Field(fourth)) continue;
+      if (!fields[1] || !third || !fourth) {
+        return `第 ${index + 1} 个 Outlook 取件四字段不完整`;
+      }
+      continue;
+    }
+    if (fields.length < 3) return `第 ${index + 1} 个账号格式错误`;
+    if (!fields[1]) return `第 ${index + 1} 个账号密码为空`;
+    if (fields.length >= 5) {
+      if (isBase32Field(fields[2])) continue;
+      if (!isBase32Field(fields[4])) {
+        return `第 ${index + 1} 个账号第五段应为 Base32 2FA 密钥`;
       }
       continue;
     }

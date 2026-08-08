@@ -416,7 +416,7 @@ function writeAccountCookies(email: string, cookies: Awaited<ReturnType<Page['co
         const account = parseLoginAccount(process.env.CHATGPT_LOGIN ?? '');
         accountEmail = account.email;
         sensitiveValues.add(account.email);
-        sensitiveValues.add(account.password);
+        if (account.password) sensitiveValues.add(account.password);
         if (account.otpSecret) sensitiveValues.add(account.otpSecret);
         const mailCredentials = credentialsFromLoginEnv();
         if (mailCredentials) await preflightMail(mailCredentials);
@@ -502,12 +502,21 @@ function writeAccountCookies(email: string, cookies: Awaited<ReturnType<Page['co
         await evidence(page, `after-email-${state}`);
 
         if (state === 'password') {
-            await notifyWebProgress('正在验证密码…', account.email);
-            await page.type("//input[@type='password' and not(@disabled)]", account.password);
-            await evidence(page, 'password-entered');
-            await clickContinue(page);
-            await solveCloudflareIfPresent(page);
-            state = await waitForState(page, ['email-verification', 'code', 'mfa-challenge', 'authenticated']);
+            if (account.password?.trim()) {
+                await notifyWebProgress('正在验证密码…', account.email);
+                await page.type("//input[@type='password' and not(@disabled)]", account.password);
+                await evidence(page, 'password-entered');
+                await clickContinue(page);
+                await solveCloudflareIfPresent(page);
+                state = await waitForState(page, ['email-verification', 'code', 'mfa-challenge', 'authenticated']);
+            } else {
+                await notifyWebProgress('未提供密码，尝试邮箱验证码登录…', account.email);
+                state = await waitForState(
+                    page,
+                    ['email-verification', 'code', 'mfa-challenge', 'authenticated'],
+                    45_000,
+                );
+            }
             await evidence(page, `after-password-${state}`);
         }
 

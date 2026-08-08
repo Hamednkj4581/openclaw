@@ -52,8 +52,21 @@ test('parseLoginAccount accepts icloud pickup without 2fa', () => {
     assert.equal(account.otpSecret, undefined);
 });
 
-test('parseLoginAccount rejects incomplete fields', () => {
-    assert.throws(() => parseLoginAccount('user@example.com----only-password'), /至少/);
+test('parseLoginAccount accepts register-style two-field webmail pickup', () => {
+    const line = 'voltage.hor222y6z@icloud.com----https://mail.ai1998.xyz/messages/DIX717FVCimDYKhhCTr7J0YnfCN03prT/voltage.horsey6z%40icloud.com';
+    const account = parseLoginAccount(line);
+    assert.equal(account.email, 'voltage.hor222y6z@icloud.com');
+    assert.equal(account.password, '');
+});
+
+test('parseLoginAccount accepts single email like register', () => {
+    const account = parseLoginAccount('alias@example.com');
+    assert.equal(account.email, 'alias@example.com');
+    assert.equal(account.password, '');
+});
+
+test('parseLoginAccount rejects empty record', () => {
+    assert.throws(() => parseLoginAccount(''), /为空/);
 });
 
 test('parseLoginAccount rejects non-Base32 third field when only three parts', () => {

@@ -127,6 +127,7 @@ jobs:
           sys.path.insert(0, '.github/scripts')
           from account_input import (
               apply_login_account_env,
+              FIELD_SEPARATOR,
               parse_accounts,
               parse_email_list,
               parse_login_accounts,
@@ -138,12 +139,21 @@ jobs:
           try:
               if mode in ('login', 'bind_phone'):
                   accounts = parse_login_accounts(os.environ['ACCOUNTS'])
+                  raw_records = split_account_records(os.environ['ACCOUNTS'])
+                  needs_forward = any(
+                      len([f for f in FIELD_SEPARATOR.split(r) if f.strip()]) == 1
+                      for r in raw_records
+                  )
                   forwarding = (
                       parse_email_list(os.environ.get('FORWARDING_EMAILS', ''))
                       if (os.environ.get('FORWARDING_EMAILS') or '').strip()
                       else []
                   )
-                  if forwarding:
+                  if needs_forward:
+                      if not forwarding:
+                          raise ValueError('存在单邮箱账号时必须配置 forwarding_emails')
+                      resolve_forward_mailbox(forwarding, os.environ.get('FORWARD_MAILBOXES', ''))
+                  elif forwarding:
                       resolve_forward_mailbox(forwarding, os.environ.get('FORWARD_MAILBOXES', ''))
               elif mode == 'register':
                   accounts = parse_accounts(os.environ['ACCOUNTS'])

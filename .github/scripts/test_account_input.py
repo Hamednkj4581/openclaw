@@ -97,5 +97,22 @@ class ParseLoginAccountsTest(unittest.TestCase):
         self.assertEqual(rows[0].otp_secret, "AJYTL5F5HRHUTOWA2ESYBJOKC2FBSRLD")
 
 
+    def test_parses_register_style_two_field_webmail(self) -> None:
+        line = (
+            "voltage.hor222y6z@icloud.com----"
+            "https://mail.ai1998.xyz/messages/DIX717FVCimDYKhhCTr7J0YnfCN03prT/voltage.horsey6z%40icloud.com"
+        )
+        row = parse_login_accounts(line)[0]
+        self.assertEqual(row.email, "voltage.hor222y6z@icloud.com")
+        self.assertEqual(row.password, "")
+        self.assertTrue(row.webmail_url)
+        self.assertTrue(row.has_inline_mail)
+
+    def test_parses_single_email(self) -> None:
+        row = parse_login_accounts("alias@example.com")[0]
+        self.assertEqual(row.email, "alias@example.com")
+        self.assertFalse(row.has_inline_mail)
+
+
 if __name__ == "__main__":
     unittest.main()

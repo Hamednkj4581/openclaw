@@ -656,9 +656,9 @@ export default function App() {
             name="accounts"
             rules={[{ required: true, message: '请填写账号' }]}
             extra={
-              mode === 'register'
-                ? '支持单邮箱、Outlook 四字段、iCloud 两字段；多账号用换行或分号分隔'
-                : '支持 email----password----2fa；或 Outlook/iCloud/网页取件（与注册相同，可再加 2FA）；多账号用换行或分号分隔'
+              mode === 'register' || mode === 'login' || mode === 'bind_phone'
+                ? '与注册相同：单邮箱、email----取件链接、Outlook 四字段；登录/绑定还可加 email----password----2fa'
+                : undefined
             }
           >
             <TextArea
@@ -666,7 +666,7 @@ export default function App() {
               placeholder={
                 mode === 'register'
                   ? 'email@example.com\n或 email----password----client_id----refresh_token'
-                  : 'email----password----2fa\n或 email----password----client_id----refresh_token----2fa'
+                  : 'email----取件链接\n或 email----password----2fa'
               }
             />
           </Form.Item>

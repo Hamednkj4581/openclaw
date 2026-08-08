@@ -169,12 +169,8 @@ def _parse_login_fields(fields: list[str], index: int) -> LoginAccountRecord:
 def parse_login_accounts(value: str) -> list[LoginAccountRecord]:
     """解析登录/绑定手机账号。
 
-  在注册取件格式基础上额外支持 2FA（Base32）：
-  - email----password----2fa
-  - email----password----2fa----尾部可忽略
-  - email----password----取件链接或 iCloud Key----2fa
-  - email----password----client_id----refresh_token
-  - email----password----client_id----refresh_token----2fa
+    与注册相同的取件格式（单邮箱 / 两字段 / Outlook 四字段），
+    并额外支持 email----password----2fa 及取件 + 2FA 组合。
     """
     records = [record.strip() for record in ACCOUNT_SEPARATOR.split(value) if record.strip()]
     if not records:
@@ -183,10 +179,50 @@ def parse_login_accounts(value: str) -> list[LoginAccountRecord]:
     accounts: list[LoginAccountRecord] = []
     for index, record in enumerate(records, 1):
         fields = [field.strip() for field in FIELD_SEPARATOR.split(record) if field.strip()]
+
+        if len(fields) == 1:
+            if not EMAIL_RE.match(fields[0]):
+                raise ValueError(f"第 {index} 个邮箱格式错误")
+            accounts.append(LoginAccountRecord(email=fields[0], password=""))
+            continue
+
+        if len(fields) == 2:
+            if not EMAIL_RE.match(fields[0]):
+                raise ValueError(f"第 {index} 个邮箱格式错误")
+            if not fields[1]:
+                raise ValueError(f"第 {index} 个取件字段为空")
+            pickup = fields[1]
+            if _is_url(pickup):
+                accounts.append(
+                    LoginAccountRecord(email=fields[0], password="", webmail_url=pickup)
+                )
+            else:
+                accounts.append(
+                    LoginAccountRecord(email=fields[0], password="", icloud_api_key=pickup)
+                )
+            continue
+
+        if len(fields) == 4:
+            third, fourth = fields[2], fields[3]
+            if not _is_base32(third) and not _is_base32(fourth):
+                if not EMAIL_RE.match(fields[0]):
+                    raise ValueError(f"第 {index} 个邮箱格式错误")
+                if any(not field for field in fields):
+                    raise ValueError(f"第 {index} 个 Outlook 取件四字段不完整")
+                accounts.append(
+                    LoginAccountRecord(
+                        email=fields[0],
+                        password=fields[1],
+                        client_id=third,
+                        refresh_token=fourth,
+                    )
+                )
+                continue
+
         if len(fields) < 3:
             raise ValueError(
-                f"第 {index} 个登录账号格式错误，至少须为 email----password----2fa 或取件字段；"
-                "多个账号请用分号或换行分隔"
+                f"第 {index} 个账号格式错误；"
+                "支持单邮箱、两字段取件、Outlook 四字段，或 email----password----2fa"
             )
         accounts.append(_parse_login_fields(fields, index))
     return accounts
@@ -221,6 +257,11 @@ def apply_login_account_env(
     elif record.client_id and record.refresh_token:
         print(f"::add-mask::{record.client_id}")
         print(f"::add-mask::{record.refresh_token}")
+        if record.password:
+            print(f"::add-mask::{record.password}")
+            env_file.write(
+                f"EMAIL_PASSWORD<<__ACCOUNT_VALUE__\n{record.password}\n__ACCOUNT_VALUE__\n"
+            )
         env_file.write(f"CLIENT_ID<<__ACCOUNT_VALUE__\n{record.client_id}\n__ACCOUNT_VALUE__\n")
         env_file.write(
             f"REFRESH_TOKEN<<__ACCOUNT_VALUE__\n{record.refresh_token}\n__ACCOUNT_VALUE__\n"

@@ -47,13 +47,31 @@ async function queryCard(card: string): Promise<Record<string, unknown>> {
     return httpJson(CARD_QUERY_URL, { card });
 }
 
-async function isTokenEligible(token: string): Promise<boolean> {
+/** 资格检查结果（供 Actions 日志定位跳过原因） */
+type EligibilityResult = {
+    ok: boolean;
+    state: string;
+    eligible: boolean;
+    error: string;
+};
+
+async function checkTokenEligibility(token: string): Promise<EligibilityResult> {
     const payload = await httpJson(PROMO_CHECK_URL, { accessTokens: [token] });
     const results = payload.results;
-    if (!Array.isArray(results) || !results[0] || typeof results[0] !== 'object') return false;
+    if (!Array.isArray(results) || !results[0] || typeof results[0] !== 'object') {
+        return { ok: false, state: '', eligible: false, error: '资格接口无结果' };
+    }
     const row = results[0] as Record<string, unknown>;
-    if (row.error) return false;
-    return row.state === 'eligible' && Boolean(row.eligible);
+    const state = typeof row.state === 'string' ? row.state : '';
+    const eligible = Boolean(row.eligible);
+    const error = row.error != null ? String(row.error) : '';
+    if (error) return { ok: false, state, eligible: false, error };
+    return {
+        ok: state === 'eligible' && eligible,
+        state: state || (eligible ? 'eligible' : 'ineligible'),
+        eligible,
+        error: '',
+    };
 }
 
 async function submitGcashTask(card: string, token: string): Promise<string[]> {
@@ -97,6 +115,8 @@ async function pollGcashLink(jobIds: string[], onProgress: ProgressFn): Promise<
     let link = '';
     let failed = 0;
 
+    logger.info('开始轮询提链任务：job=%s，最多 %s 次、间隔 %ss', jobIds.join(','), POLL_MAX_ATTEMPTS, POLL_INTERVAL_MS / 1000);
+
     for (let attempt = 1; attempt <= POLL_MAX_ATTEMPTS; attempt++) {
         const rows = await fetchTaskStatuses([...pending].sort());
         for (const row of rows) {
@@ -107,15 +127,31 @@ async function pollGcashLink(jobIds: string[], onProgress: ProgressFn): Promise<
             pending.delete(jobId);
             if (status === 'done') {
                 const picked = pickPaymentLink(row);
-                if (picked) link = picked;
-                else failed += 1;
+                if (picked) {
+                    link = picked;
+                    logger.info('提链任务完成：%s status=done，已拿到链接', jobId);
+                } else {
+                    failed += 1;
+                    logger.warn('提链任务完成但无链接字段：%s keys=%s', jobId, Object.keys(row).join(','));
+                }
             } else {
                 failed += 1;
-                logger.warn('提链任务结束：%s status=%s', jobId, status || '?');
+                const err = row.error != null ? String(row.error) : '';
+                logger.warn('提链任务结束：%s status=%s%s', jobId, status || '?', err ? ` error=${err}` : '');
             }
         }
 
         if (attempt === 1 || attempt % 6 === 0) {
+            const statuses = rows
+                .map((row) => `${String(row.job_id || '?').slice(0, 8)}…=${String(row.status || '?')}`)
+                .join(', ');
+            logger.info(
+                '提链轮询中：第 %s/%s 次，待完成=%s%s',
+                attempt,
+                POLL_MAX_ATTEMPTS,
+                pending.size,
+                statuses ? `，状态=[${statuses}]` : '',
+            );
             await onProgress(pending.size ? '正在等待支付链接生成，请稍候…' : '支付链接即将就绪…');
         }
         if (!pending.size) break;
@@ -123,7 +159,7 @@ async function pollGcashLink(jobIds: string[], onProgress: ProgressFn): Promise<
     }
 
     if (pending.size) {
-        logger.warn('提链轮询超时，未完成任务数：%s', pending.size);
+        logger.warn('提链轮询超时，未完成任务数：%s，job=%s', pending.size, [...pending].join(','));
         failed += pending.size;
     }
     if (!link) {
@@ -144,7 +180,11 @@ export async function extractAccountPaymentLink(
     accessToken: string,
     onProgress: ProgressFn = async () => undefined
 ): Promise<string | undefined> {
-    if (!isPaymentLinkEnabled()) return undefined;
+    const linkType = (process.env.PAYMENT_LINK_TYPE || '').trim();
+    if (!isPaymentLinkEnabled()) {
+        logger.info('未启用 GCash 提链（PAYMENT_LINK_TYPE=%s），跳过', linkType || '空');
+        return undefined;
+    }
     const card = (process.env.PAYMENT_CARD || '').trim();
     if (!card) {
         logger.warn('已选择 gcash 但未提供卡密，跳过提链');
@@ -156,28 +196,47 @@ export async function extractAccountPaymentLink(
         console.log(`::add-mask::${accessToken}`);
     }
 
+    logger.info('开始单账号 GCash 提链');
     try {
         await onProgress('正在检查支付资格…');
+        logger.info('正在查询卡密可用性…');
         const cardInfo = await queryCard(card);
         if (!cardInfo.ok || !cardInfo.exists) {
             throw new Error(String(cardInfo.error || '卡密不可用'));
         }
+        logger.info('卡密可用，正在检查账号支付资格…');
 
-        const eligible = await isTokenEligible(accessToken);
-        if (!eligible) {
+        const eligibility = await checkTokenEligibility(accessToken);
+        logger.info(
+            '支付资格结果：ok=%s state=%s eligible=%s%s',
+            eligibility.ok,
+            eligibility.state || '?',
+            eligibility.eligible,
+            eligibility.error ? ` error=${eligibility.error}` : '',
+        );
+        if (!eligibility.ok) {
+            logger.warn('当前账号暂无支付资格，已跳过提链');
             await onProgress('当前账号暂无支付资格，已跳过提链');
             return undefined;
         }
 
         await onProgress('正在创建支付链接…');
+        logger.info('正在创建 GCash 提链任务…');
         const jobIds = await submitGcashTask(card, accessToken);
         if (!jobIds.length) throw new Error('未创建提链任务');
+        logger.info('已创建提链任务：%s', jobIds.join(','));
 
         await onProgress('正在等待支付链接生成，请稍候…');
         const link = await pollGcashLink(jobIds, onProgress);
         fs.writeFileSync('payment-link.txt', `${link}\n`, 'utf8');
         await onProgress('支付链接已就绪');
-        logger.info('单账号提链成功');
+        let host = '';
+        try {
+            host = new URL(link).host;
+        } catch {
+            host = '(无法解析)';
+        }
+        logger.info('单账号提链成功：host=%s length=%s', host, link.length);
         return link;
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

@@ -125,25 +125,33 @@ export async function finishAccountSuccess(
     // 先回传 token，此时尚未进入保持倒计时
     await notifyWebAccountSuccess(email, accessToken);
 
+    logger.info('登录/注册已成功，进入提链阶段（提链不占用保持时长）');
     const paymentLink = await extractAccountPaymentLink(accessToken, (message) => notifyWebProgress(message, email));
     let paymentQr: string | undefined;
     let paymentQrUrl: string | undefined;
     if (paymentLink) {
         if (browser) {
+            logger.info('提链成功，正在打开支付页提取二维码…');
             await notifyWebProgress('正在打开支付页获取二维码…', email);
             const captured = await capturePaymentQr(browser, paymentLink, proxyAuth);
             paymentQr = captured?.dataUrl;
             paymentQrUrl = captured?.qrUrl;
             if (!paymentQr) {
+                logger.warn('支付链接已就绪，但二维码提取失败');
                 await notifyWebProgress('支付链接已就绪，二维码获取失败', email).catch(() => undefined);
             }
+        } else {
+            logger.warn('提链成功但无浏览器实例，跳过二维码提取');
         }
         await notifyWebPaymentLink(email, paymentLink, paymentQr, paymentQrUrl);
+    } else {
+        logger.info('提链阶段未得到支付链接，跳过二维码提取');
     }
 
     // 提链完成后再开始「等待关闭」
     const holdMinutes = resolveHoldMinutes();
     const holdUntil = Date.now() + holdMinutes * 60 * 1000;
+    logger.info('提链阶段结束，即将开始保持等待 %s 分钟', holdMinutes);
     await notifyWebAccountSuccess(email, accessToken, {
         holdUntil,
         ...(paymentLink ? { paymentLink } : {}),

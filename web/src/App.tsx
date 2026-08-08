@@ -6,7 +6,6 @@ import {
   Form,
   Input,
   Progress,
-  QRCode,
   Radio,
   Select,
   Space,
@@ -441,9 +440,11 @@ export default function App() {
                   {account.paymentLink ? (
                     <div className="payment-box">
                       <Text strong>支付链接</Text>
-                      <div className="payment-qr">
-                        <QRCode value={account.paymentLink} size={148} />
-                      </div>
+                      {account.paymentQr ? (
+                        <div className="payment-qr">
+                          <img src={account.paymentQr} alt="支付二维码" width={168} height={168} />
+                        </div>
+                      ) : null}
                       <Space.Compact className="token-box">
                         <Input value={account.paymentLink} readOnly />
                         <Button icon={<CopyOutlined />} onClick={() => void copyText(account.paymentLink!, '已复制支付链接')}>

@@ -105,6 +105,14 @@
   padding: 8px 0;
 }
 
+.payment-qr img {
+  width: 168px;
+  height: 168px;
+  object-fit: contain;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+}
+
 @media (max-width: 640px) {
   .page {
     padding-top: 28px;

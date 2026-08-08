@@ -30,6 +30,7 @@ export function publicStatus(state: TaskState) {
       error: a.error || undefined,
       hint: a.hint || undefined,
       paymentLink: a.paymentLink || undefined,
+      paymentQr: a.paymentQr || undefined,
       holdUntil: a.holdUntil || undefined,
     })),
     done: state.phase === 'done' || state.phase === 'failed',

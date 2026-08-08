@@ -21,6 +21,7 @@ export interface AccountStatus {
   error?: string;
   hint?: string;
   paymentLink?: string;
+  paymentQr?: string;
   holdUntil?: number;
 }
 

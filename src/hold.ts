@@ -1,6 +1,8 @@
+import type { Browser } from 'puppeteer';
 import Utility from './Utility.js';
 import logger from './logger.js';
 import { extractAccountPaymentLink } from './paymentLink.js';
+import { capturePaymentQrDataUrl, type ProxyAuth } from './paymentQr.js';
 
 const ALLOWED_HOLD_MINUTES = new Set([5, 10, 15, 30]);
 
@@ -57,16 +59,17 @@ export async function notifyWebProgress(message: string, email?: string): Promis
     });
 }
 
-/** 成功后回传 access token（可附带支付链接；holdUntil 可选，提链完成后再传） */
+/** 成功后回传 access token（可附带支付链接/二维码；holdUntil 可选，提链完成后再传） */
 export async function notifyWebAccountSuccess(
     email: string,
     accessToken: string,
-    options?: { holdUntil?: number; paymentLink?: string }
+    options?: { holdUntil?: number; paymentLink?: string; paymentQr?: string }
 ): Promise<void> {
     const config = webCallbackConfig();
     if (!config) return;
     const holdUntil = options?.holdUntil;
     const paymentLink = options?.paymentLink?.trim();
+    const paymentQr = options?.paymentQr?.trim();
     await postWebCallback({
         event: 'account_done',
         account: {
@@ -76,16 +79,22 @@ export async function notifyWebAccountSuccess(
             accessToken,
             ...(typeof holdUntil === 'number' && holdUntil > 0 ? { holdUntil } : {}),
             ...(paymentLink ? { paymentLink } : {}),
+            ...(paymentQr ? { paymentQr } : {}),
         },
     });
 }
 
-/** 账号已成功后补传支付链接 */
-export async function notifyWebPaymentLink(email: string, paymentLink: string): Promise<void> {
+/** 账号已成功后补传支付链接与页面内二维码 */
+export async function notifyWebPaymentLink(
+    email: string,
+    paymentLink: string,
+    paymentQr?: string,
+): Promise<void> {
     const config = webCallbackConfig();
     if (!config) return;
     const link = paymentLink.trim();
     if (!link) return;
+    const qr = paymentQr?.trim();
     await postWebCallback({
         event: 'account_done',
         account: {
@@ -93,21 +102,35 @@ export async function notifyWebPaymentLink(email: string, paymentLink: string): 
             email,
             ok: true,
             paymentLink: link,
+            ...(qr ? { paymentQr: qr } : {}),
         },
     });
 }
 
 /**
- * 顺序：回传 token → 提链（浏览器仍打开）→ 再开始保持等待关闭。
- * 提链不得占用保持时长。
+ * 顺序：回传 token → 提链 → 打开提链页提取二维码 → 再开始保持等待关闭。
+ * 提链/取码不得占用保持时长。
  */
-export async function finishAccountSuccess(email: string, accessToken: string): Promise<void> {
+export async function finishAccountSuccess(
+    email: string,
+    accessToken: string,
+    browser?: Browser | null,
+    proxyAuth?: ProxyAuth | null,
+): Promise<void> {
     // 先回传 token，此时尚未进入保持倒计时
     await notifyWebAccountSuccess(email, accessToken);
 
     const paymentLink = await extractAccountPaymentLink(accessToken, (message) => notifyWebProgress(message, email));
+    let paymentQr: string | undefined;
     if (paymentLink) {
-        await notifyWebPaymentLink(email, paymentLink);
+        if (browser) {
+            await notifyWebProgress('正在打开支付页获取二维码…', email);
+            paymentQr = await capturePaymentQrDataUrl(browser, paymentLink, proxyAuth);
+            if (!paymentQr) {
+                await notifyWebProgress('支付链接已就绪，二维码获取失败', email).catch(() => undefined);
+            }
+        }
+        await notifyWebPaymentLink(email, paymentLink, paymentQr);
     }
 
     // 提链完成后再开始「等待关闭」
@@ -116,6 +139,7 @@ export async function finishAccountSuccess(email: string, accessToken: string): 
     await notifyWebAccountSuccess(email, accessToken, {
         holdUntil,
         ...(paymentLink ? { paymentLink } : {}),
+        ...(paymentQr ? { paymentQr } : {}),
     });
     await notifyWebProgress(`将保持约 ${holdMinutes} 分钟后关闭…`, email);
     await waitHoldMinutes(holdMinutes, holdUntil);

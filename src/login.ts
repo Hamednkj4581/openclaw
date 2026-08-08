@@ -474,7 +474,7 @@ async function extractAccessToken(page: Page): Promise<string> {
             );
 
         logger.info('已打印 access token（Base64）');
-        await finishAccountSuccess(account.email, accessToken);
+        await finishAccountSuccess(account.email, accessToken, chrome, proxy);
     } catch (error) {
         await fail(error);
     } finally {

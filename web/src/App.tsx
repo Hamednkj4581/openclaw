@@ -332,6 +332,7 @@ export default function App() {
 
   const waiting = Boolean(taskId && (!status || !status.done));
   const waitingTip = useWaitingTip(waiting);
+  const submitBusy = submitting || waiting;
 
   const allCredentialLines = useMemo(() => {
     const rows = status?.accounts || [];
@@ -562,8 +563,15 @@ export default function App() {
             </Form.Item>
           ) : null}
 
-          <Button type="primary" htmlType="submit" icon={<PlayCircleOutlined />} loading={submitting} size="large">
-            {mode === 'register' ? '开始注册' : '开始登录'}
+          <Button
+            type="primary"
+            htmlType="submit"
+            icon={<PlayCircleOutlined />}
+            loading={submitBusy}
+            disabled={waiting}
+            size="large"
+          >
+            {waiting ? '任务进行中…' : mode === 'register' ? '开始注册' : '开始登录'}
           </Button>
         </Form>
       </Card>

@@ -15,6 +15,7 @@ import { installNetworkCapture } from './networkCapture.js';
 import { buildJapanStickyProxy, buildProxyPacUrl, is711ProxyEnabled, preflightProxy, rotateStickySession } from './proxy.js';
 import { AUTHENTICATED_SELECTORS, CONTINUE_SELECTORS, LOGIN_SELECTORS, MFA_CHALLENGE_SELECTORS, MFA_CODE_SELECTORS, MFA_ENABLED_SELECTORS, MFA_VERIFY_SELECTORS, SIGNUP_EMAIL_SELECTORS, SIGNUP_SELECTORS } from './selectors.js';
 import { cookieFileNameForEmail, writeCookieEditorJson } from './cookieExport.js';
+import { notifyWebAccountSuccess, resolveHoldMinutes, waitHoldMinutes } from './hold.js';
 
 const MAX_TIMEOUT = Math.pow(2, 31) - 1;
 const EVIDENCE_TIMEOUT_MS = 15_000;
@@ -797,6 +798,11 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
             [email, chatGptPassword, ...(otpSecret ? [otpSecret] : []), session.accessToken, new Date().toString()].join('----')
         );
         logger.info('ChatGPT 注册完成%s，已提取 accessToken 并导出 session/cookie', otpSecret ? '，已开启 2FA' : '');
+
+        const holdMinutes = resolveHoldMinutes();
+        const holdUntil = Date.now() + holdMinutes * 60 * 1000;
+        await notifyWebAccountSuccess(email, session.accessToken, holdUntil);
+        await waitHoldMinutes(holdMinutes, holdUntil);
     } catch (error) {
         await fail(error);
     } finally {

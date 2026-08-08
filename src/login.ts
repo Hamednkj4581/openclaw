@@ -22,16 +22,11 @@ import {
     SIGNUP_SELECTORS,
 } from './selectors.js';
 import { parseLoginAccount } from './loginAccount.js';
+import { notifyWebAccountSuccess, resolveHoldMinutes, waitHoldMinutes } from './hold.js';
 
 const MAX_TIMEOUT = Math.pow(2, 31) - 1;
 const EVIDENCE_TIMEOUT_MS = 15_000;
 const MAX_OPEN_CHATGPT_ATTEMPTS = 3;
-const ALLOWED_HOLD_MINUTES = new Set([5, 10, 15, 30]);
-
-function resolveHoldMinutes(): number {
-    const raw = Number(process.env.LOGIN_HOLD_MINUTES || '5');
-    return ALLOWED_HOLD_MINUTES.has(raw) ? raw : 5;
-}
 
 type LoginState = 'email' | 'password' | 'mfa-challenge' | 'authenticated' | 'unknown';
 
@@ -44,42 +39,6 @@ function redactHtml(html: string): string {
     for (const value of sensitiveValues)
         if (value) redacted = redacted.replaceAll(value, '[REDACTED]');
     return redacted;
-}
-
-async function notifyWebLoginSuccess(email: string, accessToken: string, holdUntil: number): Promise<void> {
-    const taskId = (process.env.WEB_TASK_ID || '').trim();
-    const url = (process.env.WEB_CALLBACK_URL || '').trim();
-    const secret = (process.env.WEBHOOK_SECRET || '').trim();
-    const index = Number(process.env.WEB_ACCOUNT_INDEX || '0');
-    if (!taskId || !url || !secret) return;
-
-    try {
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json; charset=utf-8',
-                'X-Webhook-Secret': secret,
-                'User-Agent': 'gpt-free-register-login',
-            },
-            body: JSON.stringify({
-                taskId,
-                event: 'account_done',
-                account: {
-                    index: Number.isInteger(index) ? index : 0,
-                    email,
-                    ok: true,
-                    accessToken,
-                    holdUntil,
-                },
-            }),
-        });
-        if (!response.ok) {
-            logger.warn('网页回调失败：HTTP %s', response.status);
-        }
-    } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        logger.warn('网页回调异常：%s', message);
-    }
 }
 
 async function withEvidenceTimeout<T>(operation: Promise<T>, label: string): Promise<T> {
@@ -507,19 +466,11 @@ async function extractAccessToken(page: Page): Promise<string> {
             );
 
         const holdMinutes = resolveHoldMinutes();
-        const holdMs = holdMinutes * 60 * 1000;
-        const holdUntil = Date.now() + holdMs;
+        const holdUntil = Date.now() + holdMinutes * 60 * 1000;
         // 先回传 token，再进入保持等待
-        await notifyWebLoginSuccess(account.email, accessToken, holdUntil);
-        logger.info('已打印 access token（Base64），开始等待 %s 分钟后退出', holdMinutes);
-
-        const waitUntil = holdUntil;
-        while (Date.now() < waitUntil) {
-            const remainSec = Math.ceil((waitUntil - Date.now()) / 1000);
-            logger.info('登录保持中，剩余约 %s 秒', remainSec);
-            await Utility.waitForSeconds(Math.min(60, remainSec));
-        }
-        logger.info('等待结束，准备退出');
+        await notifyWebAccountSuccess(account.email, accessToken, holdUntil);
+        logger.info('已打印 access token（Base64）');
+        await waitHoldMinutes(holdMinutes, holdUntil);
     } catch (error) {
         await fail(error);
     } finally {

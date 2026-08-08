@@ -141,6 +141,7 @@ export default function App() {
         enable_711_proxy: isProxyEnabled(values.proxy_region),
         payment_link_type: values.payment_link_type,
         payment_card: values.payment_card,
+        hold_minutes: Number(values.hold_minutes) || 15,
       };
       const result =
         mode === 'register'
@@ -153,7 +154,6 @@ export default function App() {
           : await triggerTask({
               ...shared,
               mode: 'login',
-              hold_minutes: Number(values.hold_minutes) || 15,
             });
       setTaskId(result.taskId);
       setStatus(null);
@@ -242,11 +242,10 @@ export default function App() {
               <Form.Item label="开启两步验证" name="enable_mfa" valuePropName="checked">
                 <Switch />
               </Form.Item>
-            ) : (
-              <Form.Item label="延迟关闭" name="hold_minutes" rules={[{ required: true, message: '请选择延迟关闭时间' }]}>
-                <Select style={{ width: 140 }} options={HOLD_MINUTES_OPTIONS} />
-              </Form.Item>
-            )}
+            ) : null}
+            <Form.Item label="延迟关闭" name="hold_minutes" rules={[{ required: true, message: '请选择延迟关闭时间' }]}>
+              <Select style={{ width: 140 }} options={HOLD_MINUTES_OPTIONS} />
+            </Form.Item>
             <Form.Item label="代理地区" name="proxy_region" rules={[{ required: true, message: '请选择代理地区' }]}>
               <Select style={{ width: 200 }} options={PROXY_REGION_OPTIONS} />
             </Form.Item>
@@ -262,12 +261,7 @@ export default function App() {
             />
           </Form.Item>
           {paymentLinkType === 'gcash' ? (
-            <Form.Item
-              label="卡密"
-              name="payment_card"
-              rules={[{ required: true, message: '请填写卡密' }]}
-              extra="选择支付提链后必填，汇总阶段用于提取支付链接"
-            >
+            <Form.Item label="卡密" name="payment_card" rules={[{ required: true, message: '请填写卡密' }]}>
               <Input.Password placeholder="请输入卡密" autoComplete="off" />
             </Form.Item>
           ) : null}

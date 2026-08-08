@@ -58,6 +58,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   };
   await writeTask(context.env, taskId, state);
 
+  const hold = Number(body.hold_minutes);
+  const holdMinutes = [5, 10, 15, 30].includes(hold) ? String(hold) : '15';
+
   const inputs: Record<string, string> = {
     commit_message: commitMessage(mode),
     accounts,
@@ -65,14 +68,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     enable_711_proxy: String(Boolean(body.enable_711_proxy)),
     payment_link_type: paymentLinkType,
     payment_card: paymentLinkType === 'gcash' ? paymentCard : '',
+    hold_minutes: holdMinutes,
   };
 
   if (mode === 'register') {
     inputs.forwarding_emails = (body.forwarding_emails || '').trim();
     inputs.enable_mfa = String(body.enable_mfa !== false);
-  } else {
-    const hold = Number(body.hold_minutes);
-    inputs.hold_minutes = [5, 10, 15, 30].includes(hold) ? String(hold) : '15';
   }
 
   try {

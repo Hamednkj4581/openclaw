@@ -17,7 +17,7 @@ on:
         default: false
         type: boolean
       hold_minutes:
-        description: '登录成功后保持分钟数（先回传 token，再等待关闭）'
+        description: '成功后保持分钟数（先回传 token，再等待关闭）'
         required: false
         default: '15'
         type: choice
@@ -141,7 +141,7 @@ jobs:
         id: login-run
         env:
           ENABLE_711_PROXY: ${{ inputs.enable_711_proxy }}
-          LOGIN_HOLD_MINUTES: ${{ inputs.hold_minutes }}
+          HOLD_MINUTES: ${{ inputs.hold_minutes }}
           WEB_TASK_ID: ${{ inputs.web_task_id }}
           WEB_CALLBACK_URL: ${{ secrets.WEB_CALLBACK_URL }}
           WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}

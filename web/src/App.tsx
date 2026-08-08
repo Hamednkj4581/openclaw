@@ -213,7 +213,7 @@ export default function App() {
             extra={
               mode === 'register'
                 ? '支持单邮箱、Outlook 四字段、iCloud 两字段；多账号用换行或分号分隔'
-                : '格式：email----password----2fa（可带注册结果尾部字段）；多账号换行或分号分隔'
+                : '格式：email----password----2fa；第三段识别为 2FA 后忽略第四段及以后（取件链接等）'
             }
           >
             <TextArea

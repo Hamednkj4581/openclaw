@@ -81,7 +81,11 @@ _BASE32_RE = re.compile(r"^[A-Z2-7=]+$", re.IGNORECASE)
 
 
 def parse_login_accounts(value: str) -> list[list[str]]:
-    """Parse login accounts: email----password----2fa（允许尾部多余字段，如注册结果行）。"""
+    """Parse login accounts: email----password----2fa。
+
+    对第三段做 2FA（Base32）识别；识别成功则忽略第四段及以后
+    （网页取件链接、注册结果里的 accessToken/时间等）。
+    """
     records = [record.strip() for record in ACCOUNT_SEPARATOR.split(value) if record.strip()]
     if not records:
         raise ValueError("accounts 输入不能为空")
@@ -94,12 +98,14 @@ def parse_login_accounts(value: str) -> list[list[str]]:
                 f"第 {index} 个登录账号格式错误，必须是 email----password----2fa；"
                 "多个账号请用分号或换行分隔"
             )
-        email, password, otp = fields[0], fields[1], fields[2].replace(" ", "")
+        email, password, third = fields[0], fields[1], fields[2]
         if not EMAIL_RE.match(email):
             raise ValueError(f"第 {index} 个登录邮箱格式错误")
         if not password:
             raise ValueError(f"第 {index} 个登录密码为空")
+        otp = third.replace(" ", "")
         if not _BASE32_RE.match(otp):
             raise ValueError(f"第 {index} 个 2FA 密钥应为 Base32（TOTP secret）")
+        # 第三段已识别为 2FA，丢弃第四段及以后
         accounts.append([email, password, otp])
     return accounts

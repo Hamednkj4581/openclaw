@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       accounts:
-        description: '多个账号用英文分号 ; 分隔（也兼容换行）：email----password----2fa（可带注册结果尾部字段）'
+        description: '多个账号用英文分号 ; 分隔（也兼容换行）：email----password----2fa；第三段为 2FA 时忽略第四段及以后'
         required: true
         type: string
       enable_711_proxy:

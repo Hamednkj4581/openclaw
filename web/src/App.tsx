@@ -31,11 +31,31 @@ const PROXY_REGION_OPTIONS = [
 ];
 
 const PROXY_STORAGE_KEY = 'gpt-web-console.proxy.v2';
+const SETTINGS_STORAGE_KEY = 'gpt-web-console.settings.v1';
 
 type ProxyStore = {
   region: string;
   /** 各地区代理链接文本（多行） */
   linksByRegion: Record<string, string>;
+};
+
+/** 除账号输入外的表单设置（浏览器本地持久化） */
+type PersistedSettings = {
+  mode: TaskMode;
+  forwarding_emails: string;
+  enable_mfa: boolean;
+  hold_minutes: number;
+  payment_link_type: string;
+  payment_card: string;
+};
+
+const DEFAULT_SETTINGS: PersistedSettings = {
+  mode: 'register',
+  forwarding_emails: FORWARDING_EMAIL_OPTIONS[0].value,
+  enable_mfa: true,
+  hold_minutes: 15,
+  payment_link_type: '未选择',
+  payment_card: '',
 };
 
 function readProxyStore(): ProxyStore {
@@ -66,6 +86,37 @@ function saveProxyRegionLinks(region: string, links: string): void {
   writeProxyStore(store);
 }
 
+function readSettings(): PersistedSettings {
+  try {
+    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (!raw) return { ...DEFAULT_SETTINGS };
+    const parsed = JSON.parse(raw) as Partial<PersistedSettings>;
+    if (!parsed || typeof parsed !== 'object') return { ...DEFAULT_SETTINGS };
+    const hold = Number(parsed.hold_minutes);
+    return {
+      mode: parsed.mode === 'login' || parsed.mode === 'register' ? parsed.mode : DEFAULT_SETTINGS.mode,
+      forwarding_emails:
+        typeof parsed.forwarding_emails === 'string' && parsed.forwarding_emails
+          ? parsed.forwarding_emails
+          : DEFAULT_SETTINGS.forwarding_emails,
+      enable_mfa: typeof parsed.enable_mfa === 'boolean' ? parsed.enable_mfa : DEFAULT_SETTINGS.enable_mfa,
+      hold_minutes: [0, 5, 10, 15, 30].includes(hold) ? hold : DEFAULT_SETTINGS.hold_minutes,
+      payment_link_type:
+        parsed.payment_link_type === 'gcash' || parsed.payment_link_type === '未选择'
+          ? parsed.payment_link_type
+          : DEFAULT_SETTINGS.payment_link_type,
+      payment_card: typeof parsed.payment_card === 'string' ? parsed.payment_card : '',
+    };
+  } catch {
+    return { ...DEFAULT_SETTINGS };
+  }
+}
+
+function writeSettings(patch: Partial<PersistedSettings>): void {
+  const next = { ...readSettings(), ...patch };
+  localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(next));
+}
+
 const HOLD_MINUTES_OPTIONS = [
   { value: 0, label: '0 分钟' },
   { value: 5, label: '5 分钟' },
@@ -93,6 +144,29 @@ interface TaskFormValues {
 
 function isProxyEnabled(region: string | undefined): boolean {
   return Boolean(region && region !== 'none');
+}
+
+function persistFormSettings(values: Partial<TaskFormValues>, mode: TaskMode): void {
+  const hold = Number(values.hold_minutes);
+  writeSettings({
+    mode,
+    ...(typeof values.forwarding_emails === 'string' && values.forwarding_emails
+      ? { forwarding_emails: values.forwarding_emails }
+      : {}),
+    ...(typeof values.enable_mfa === 'boolean' ? { enable_mfa: values.enable_mfa } : {}),
+    ...([0, 5, 10, 15, 30].includes(hold) ? { hold_minutes: hold } : {}),
+    ...(values.payment_link_type === 'gcash' || values.payment_link_type === '未选择'
+      ? { payment_link_type: values.payment_link_type }
+      : {}),
+    ...(typeof values.payment_card === 'string' ? { payment_card: values.payment_card } : {}),
+  });
+  if (isProxyEnabled(values.proxy_region)) {
+    saveProxyRegionLinks(values.proxy_region!, values.proxy_links || '');
+  } else if (values.proxy_region === 'none') {
+    const store = readProxyStore();
+    store.region = 'none';
+    writeProxyStore(store);
+  }
 }
 
 function formatRemain(ms: number): string {
@@ -185,7 +259,8 @@ const phasePercent: Record<TaskStatus['phase'], number> = {
 };
 
 export default function App() {
-  const [mode, setMode] = useState<TaskMode>('register');
+  const savedSettings = useMemo(() => readSettings(), []);
+  const [mode, setMode] = useState<TaskMode>(savedSettings.mode);
   const [submitting, setSubmitting] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [runName, setRunName] = useState<string | null>(null);
@@ -199,17 +274,24 @@ export default function App() {
     proxyRegionRef.current = proxyRegion;
   }, [proxyRegion]);
 
-  // 启动时恢复上次地区与对应代理链接
+  // 启动时恢复本地设置（不含账号输入）
   useEffect(() => {
+    const settings = readSettings();
     const store = readProxyStore();
-    const region = PROXY_REGION_OPTIONS.some((item) => item.value === store.region)
+    const resolvedRegion = PROXY_REGION_OPTIONS.some((item) => item.value === store.region)
       ? store.region
       : 'JP';
     form.setFieldsValue({
-      proxy_region: region,
-      proxy_links: store.linksByRegion[region] || '',
+      forwarding_emails: settings.forwarding_emails,
+      enable_mfa: settings.enable_mfa,
+      hold_minutes: settings.hold_minutes,
+      payment_link_type: settings.payment_link_type,
+      payment_card: settings.payment_card,
+      proxy_region: resolvedRegion,
+      proxy_links: resolvedRegion === 'none' ? '' : store.linksByRegion[resolvedRegion] || '',
     });
-    proxyRegionRef.current = region;
+    proxyRegionRef.current = resolvedRegion;
+    setMode(settings.mode);
   }, [form]);
 
   useEffect(() => {
@@ -268,13 +350,7 @@ export default function App() {
   const onSubmit = async (values: TaskFormValues) => {
     setSubmitting(true);
     try {
-      if (isProxyEnabled(values.proxy_region)) {
-        saveProxyRegionLinks(values.proxy_region, values.proxy_links || '');
-      } else {
-        const store = readProxyStore();
-        store.region = 'none';
-        writeProxyStore(store);
-      }
+      persistFormSettings(values, mode);
       const shared = {
         accounts: values.accounts,
         enable_711_proxy: isProxyEnabled(values.proxy_region),
@@ -351,7 +427,11 @@ export default function App() {
           optionType="button"
           buttonStyle="solid"
           value={mode}
-          onChange={(e) => setMode(e.target.value)}
+          onChange={(e) => {
+            const next = e.target.value as TaskMode;
+            setMode(next);
+            writeSettings({ mode: next });
+          }}
           options={[
             { label: '注册', value: 'register' },
             { label: '登录', value: 'login' },
@@ -363,13 +443,16 @@ export default function App() {
           layout="vertical"
           className="task-form"
           initialValues={{
-            forwarding_emails: FORWARDING_EMAIL_OPTIONS[0].value,
-            enable_mfa: true,
+            forwarding_emails: savedSettings.forwarding_emails,
+            enable_mfa: savedSettings.enable_mfa,
             proxy_region: 'JP',
             proxy_links: '',
-            hold_minutes: 15,
-            payment_link_type: '未选择',
-            payment_card: '',
+            hold_minutes: savedSettings.hold_minutes,
+            payment_link_type: savedSettings.payment_link_type,
+            payment_card: savedSettings.payment_card,
+          }}
+          onValuesChange={(_, all) => {
+            persistFormSettings(all, mode);
           }}
           onFinish={onSubmit}
         >

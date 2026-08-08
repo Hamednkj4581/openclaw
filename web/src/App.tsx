@@ -40,17 +40,11 @@ const PAYMENT_LINK_OPTIONS = [
   { value: 'gcash', label: 'gcash' },
 ];
 
-interface RegisterForm {
+/** 注册/登录共用字段；模式专属字段按需使用 */
+interface TaskFormValues {
   accounts: string;
   forwarding_emails: string;
   enable_mfa: boolean;
-  proxy_region: string;
-  payment_link_type: string;
-  payment_card: string;
-}
-
-interface LoginForm {
-  accounts: string;
   proxy_region: string;
   hold_minutes: number;
   payment_link_type: string;
@@ -101,10 +95,8 @@ export default function App() {
   const [submitting, setSubmitting] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [status, setStatus] = useState<TaskStatus | null>(null);
-  const [registerForm] = Form.useForm<RegisterForm>();
-  const [loginForm] = Form.useForm<LoginForm>();
-  const registerPaymentType = Form.useWatch('payment_link_type', registerForm);
-  const loginPaymentType = Form.useWatch('payment_link_type', loginForm);
+  const [form] = Form.useForm<TaskFormValues>();
+  const paymentLinkType = Form.useWatch('payment_link_type', form);
 
   useEffect(() => {
     if (!taskId) return;
@@ -141,39 +133,28 @@ export default function App() {
     return phasePercent[status.phase];
   }, [status]);
 
-  const onSubmitRegister = async (values: RegisterForm) => {
+  const onSubmit = async (values: TaskFormValues) => {
     setSubmitting(true);
     try {
-      const result = await triggerTask({
-        mode: 'register',
+      const shared = {
         accounts: values.accounts,
-        forwarding_emails: values.forwarding_emails,
-        enable_mfa: values.enable_mfa,
         enable_711_proxy: isProxyEnabled(values.proxy_region),
         payment_link_type: values.payment_link_type,
         payment_card: values.payment_card,
-      });
-      setTaskId(result.taskId);
-      setStatus(null);
-      message.success('已提交');
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : '提交失败');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const onSubmitLogin = async (values: LoginForm) => {
-    setSubmitting(true);
-    try {
-      const result = await triggerTask({
-        mode: 'login',
-        accounts: values.accounts,
-        enable_711_proxy: isProxyEnabled(values.proxy_region),
-        hold_minutes: Number(values.hold_minutes) || 5,
-        payment_link_type: values.payment_link_type,
-        payment_card: values.payment_card,
-      });
+      };
+      const result =
+        mode === 'register'
+          ? await triggerTask({
+              ...shared,
+              mode: 'register',
+              forwarding_emails: values.forwarding_emails,
+              enable_mfa: values.enable_mfa,
+            })
+          : await triggerTask({
+              ...shared,
+              mode: 'login',
+              hold_minutes: Number(values.hold_minutes) || 15,
+            });
       setTaskId(result.taskId);
       setStatus(null);
       message.success('已提交');
@@ -211,28 +192,41 @@ export default function App() {
           ]}
         />
 
-        {mode === 'register' ? (
-          <Form
-            form={registerForm}
-            layout="vertical"
-            className="task-form"
-            initialValues={{
-              forwarding_emails: FORWARDING_EMAIL_OPTIONS[0].value,
-              enable_mfa: true,
-              proxy_region: 'JP',
-              payment_link_type: '未选择',
-              payment_card: '',
-            }}
-            onFinish={onSubmitRegister}
+        <Form
+          form={form}
+          layout="vertical"
+          className="task-form"
+          initialValues={{
+            forwarding_emails: FORWARDING_EMAIL_OPTIONS[0].value,
+            enable_mfa: true,
+            proxy_region: 'JP',
+            hold_minutes: 15,
+            payment_link_type: '未选择',
+            payment_card: '',
+          }}
+          onFinish={onSubmit}
+        >
+          <Form.Item
+            label="账号"
+            name="accounts"
+            rules={[{ required: true, message: '请填写账号' }]}
+            extra={
+              mode === 'register'
+                ? '支持单邮箱、Outlook 四字段、iCloud 两字段；多账号用换行或分号分隔'
+                : '格式：email----password----2fa（可带注册结果尾部字段）；多账号换行或分号分隔'
+            }
           >
-            <Form.Item
-              label="账号"
-              name="accounts"
-              rules={[{ required: true, message: '请填写账号' }]}
-              extra="支持单邮箱、Outlook 四字段、iCloud 两字段；多账号用换行或分号分隔"
-            >
-              <TextArea rows={6} placeholder={'email@example.com\n或 email----password----client_id----refresh_token'} />
-            </Form.Item>
+            <TextArea
+              rows={6}
+              placeholder={
+                mode === 'register'
+                  ? 'email@example.com\n或 email----password----client_id----refresh_token'
+                  : 'email----password----2fa'
+              }
+            />
+          </Form.Item>
+
+          {mode === 'register' ? (
             <Form.Item
               label="转发邮箱"
               name="forwarding_emails"
@@ -241,90 +235,47 @@ export default function App() {
             >
               <Select options={FORWARDING_EMAIL_OPTIONS} />
             </Form.Item>
-            <Space size="large" wrap className="switches">
+          ) : null}
+
+          <Space size="large" wrap className="switches">
+            {mode === 'register' ? (
               <Form.Item label="开启两步验证" name="enable_mfa" valuePropName="checked">
                 <Switch />
               </Form.Item>
-              <Form.Item label="代理地区" name="proxy_region" rules={[{ required: true, message: '请选择代理地区' }]}>
-                <Select style={{ width: 200 }} options={PROXY_REGION_OPTIONS} />
-              </Form.Item>
-            </Space>
-            <Form.Item label="支付提链" name="payment_link_type">
-              <Select
-                style={{ width: 200 }}
-                options={PAYMENT_LINK_OPTIONS}
-                onChange={(value) => {
-                  if (value !== 'gcash') registerForm.setFieldValue('payment_card', '');
-                }}
-              />
-            </Form.Item>
-            {registerPaymentType === 'gcash' ? (
-              <Form.Item
-                label="卡密"
-                name="payment_card"
-                rules={[{ required: true, message: '请填写卡密' }]}
-                extra="选择支付提链后必填，汇总阶段用于提取支付链接"
-              >
-                <Input.Password placeholder="请输入卡密" autoComplete="off" />
-              </Form.Item>
-            ) : null}
-            <Button type="primary" htmlType="submit" icon={<PlayCircleOutlined />} loading={submitting} size="large">
-              开始注册
-            </Button>
-          </Form>
-        ) : (
-          <Form
-            form={loginForm}
-            layout="vertical"
-            className="task-form"
-            initialValues={{
-              proxy_region: 'JP',
-              hold_minutes: 15,
-              payment_link_type: '未选择',
-              payment_card: '',
-            }}
-            onFinish={onSubmitLogin}
-          >
-            <Form.Item
-              label="账号"
-              name="accounts"
-              rules={[{ required: true, message: '请填写账号' }]}
-              extra="格式：email----password----2fa（可带注册结果尾部字段）；多账号换行或分号分隔"
-            >
-              <TextArea rows={6} placeholder="email----password----2fa" />
-            </Form.Item>
-            <Space size="large" wrap className="switches">
-              <Form.Item label="代理地区" name="proxy_region" rules={[{ required: true, message: '请选择代理地区' }]}>
-                <Select style={{ width: 200 }} options={PROXY_REGION_OPTIONS} />
-              </Form.Item>
+            ) : (
               <Form.Item label="延迟关闭" name="hold_minutes" rules={[{ required: true, message: '请选择延迟关闭时间' }]}>
                 <Select style={{ width: 140 }} options={HOLD_MINUTES_OPTIONS} />
               </Form.Item>
-            </Space>
-            <Form.Item label="支付提链" name="payment_link_type">
-              <Select
-                style={{ width: 200 }}
-                options={PAYMENT_LINK_OPTIONS}
-                onChange={(value) => {
-                  if (value !== 'gcash') loginForm.setFieldValue('payment_card', '');
-                }}
-              />
+            )}
+            <Form.Item label="代理地区" name="proxy_region" rules={[{ required: true, message: '请选择代理地区' }]}>
+              <Select style={{ width: 200 }} options={PROXY_REGION_OPTIONS} />
             </Form.Item>
-            {loginPaymentType === 'gcash' ? (
-              <Form.Item
-                label="卡密"
-                name="payment_card"
-                rules={[{ required: true, message: '请填写卡密' }]}
-                extra="选择支付提链后必填，汇总阶段用于提取支付链接"
-              >
-                <Input.Password placeholder="请输入卡密" autoComplete="off" />
-              </Form.Item>
-            ) : null}
-            <Button type="primary" htmlType="submit" icon={<PlayCircleOutlined />} loading={submitting} size="large">
-              开始登录
-            </Button>
-          </Form>
-        )}
+          </Space>
+
+          <Form.Item label="支付提链" name="payment_link_type">
+            <Select
+              style={{ width: 200 }}
+              options={PAYMENT_LINK_OPTIONS}
+              onChange={(value) => {
+                if (value !== 'gcash') form.setFieldValue('payment_card', '');
+              }}
+            />
+          </Form.Item>
+          {paymentLinkType === 'gcash' ? (
+            <Form.Item
+              label="卡密"
+              name="payment_card"
+              rules={[{ required: true, message: '请填写卡密' }]}
+              extra="选择支付提链后必填，汇总阶段用于提取支付链接"
+            >
+              <Input.Password placeholder="请输入卡密" autoComplete="off" />
+            </Form.Item>
+          ) : null}
+
+          <Button type="primary" htmlType="submit" icon={<PlayCircleOutlined />} loading={submitting} size="large">
+            {mode === 'register' ? '开始注册' : '开始登录'}
+          </Button>
+        </Form>
       </Card>
 
       {taskId && (

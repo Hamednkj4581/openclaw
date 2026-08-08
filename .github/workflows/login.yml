@@ -19,7 +19,7 @@ on:
       hold_minutes:
         description: '登录成功后保持分钟数（先回传 token，再等待关闭）'
         required: false
-        default: '5'
+        default: '15'
         type: choice
         options:
           - '5'

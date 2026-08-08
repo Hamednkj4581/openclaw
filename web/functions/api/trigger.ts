@@ -72,7 +72,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     inputs.enable_mfa = String(body.enable_mfa !== false);
   } else {
     const hold = Number(body.hold_minutes);
-    inputs.hold_minutes = [5, 10, 15, 30].includes(hold) ? String(hold) : '5';
+    inputs.hold_minutes = [5, 10, 15, 30].includes(hold) ? String(hold) : '15';
   }
 
   try {

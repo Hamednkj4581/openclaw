@@ -439,18 +439,35 @@ export default function App() {
                   ) : null}
                   {account.paymentLink ? (
                     <div className="payment-box">
-                      <Text strong>支付链接</Text>
-                      {account.paymentQr ? (
-                        <div className="payment-qr">
-                          <img src={account.paymentQr} alt="支付二维码" width={168} height={168} />
-                        </div>
-                      ) : null}
+                      <Text strong>支付页链接</Text>
                       <Space.Compact className="token-box">
                         <Input value={account.paymentLink} readOnly />
-                        <Button icon={<CopyOutlined />} onClick={() => void copyText(account.paymentLink!, '已复制支付链接')}>
+                        <Button icon={<CopyOutlined />} onClick={() => void copyText(account.paymentLink!, '已复制支付页链接')}>
                           复制
                         </Button>
                       </Space.Compact>
+                      {account.paymentQr ? (
+                        <>
+                          <Text strong>支付二维码</Text>
+                          <div className="payment-qr">
+                            <img src={account.paymentQr} alt="支付二维码" width={168} height={168} />
+                          </div>
+                        </>
+                      ) : null}
+                      {account.paymentQrUrl ? (
+                        <>
+                          <Text strong>二维码链接</Text>
+                          <Space.Compact className="token-box">
+                            <Input value={account.paymentQrUrl} readOnly />
+                            <Button
+                              icon={<CopyOutlined />}
+                              onClick={() => void copyText(account.paymentQrUrl!, '已复制二维码链接')}
+                            >
+                              复制
+                            </Button>
+                          </Space.Compact>
+                        </>
+                      ) : null}
                     </div>
                   ) : null}
                   <AccountHoldCountdown holdUntil={account.holdUntil} />

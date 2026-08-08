@@ -31,6 +31,7 @@ export function publicStatus(state: TaskState) {
       hint: a.hint || undefined,
       paymentLink: a.paymentLink || undefined,
       paymentQr: a.paymentQr || undefined,
+      paymentQrUrl: a.paymentQrUrl || undefined,
       holdUntil: a.holdUntil || undefined,
     })),
     done: state.phase === 'done' || state.phase === 'failed',

@@ -14,6 +14,8 @@ export interface AccountResult {
   paymentLink?: string;
   /** 提链页内真实二维码（data:image/...;base64,...） */
   paymentQr?: string;
+  /** 二维码内容对应的 URL */
+  paymentQrUrl?: string;
   /** 登录保持结束时间（epoch ms），有值时前端显示倒计时 */
   holdUntil?: number;
 }

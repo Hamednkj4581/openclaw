@@ -14,6 +14,7 @@ interface WebhookBody {
     accessToken?: string;
     paymentLink?: string;
     paymentQr?: string;
+    paymentQrUrl?: string;
     error?: string;
     holdUntil?: number;
   };
@@ -93,6 +94,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       delete row.accessToken;
       delete row.paymentLink;
       delete row.paymentQr;
+      delete row.paymentQrUrl;
       delete row.holdUntil;
       delete row.hint;
       row.error = (body.account?.error || '处理失败').slice(0, 80);
@@ -109,6 +111,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       const paymentQr = (body.account?.paymentQr || '').trim();
       if (paymentQr.startsWith('data:image')) {
         row.paymentQr = paymentQr;
+      }
+      const paymentQrUrl = (body.account?.paymentQrUrl || '').trim();
+      if (paymentQrUrl) {
+        row.paymentQrUrl = paymentQrUrl;
       }
       const holdUntil = Number(body.account?.holdUntil);
       if (Number.isFinite(holdUntil) && holdUntil > 0) {

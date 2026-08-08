@@ -2,7 +2,7 @@ import type { Browser } from 'puppeteer';
 import Utility from './Utility.js';
 import logger from './logger.js';
 import { extractAccountPaymentLink } from './paymentLink.js';
-import { capturePaymentQrDataUrl, type ProxyAuth } from './paymentQr.js';
+import { capturePaymentQr, type ProxyAuth } from './paymentQr.js';
 
 const ALLOWED_HOLD_MINUTES = new Set([5, 10, 15, 30]);
 
@@ -63,13 +63,14 @@ export async function notifyWebProgress(message: string, email?: string): Promis
 export async function notifyWebAccountSuccess(
     email: string,
     accessToken: string,
-    options?: { holdUntil?: number; paymentLink?: string; paymentQr?: string }
+    options?: { holdUntil?: number; paymentLink?: string; paymentQr?: string; paymentQrUrl?: string }
 ): Promise<void> {
     const config = webCallbackConfig();
     if (!config) return;
     const holdUntil = options?.holdUntil;
     const paymentLink = options?.paymentLink?.trim();
     const paymentQr = options?.paymentQr?.trim();
+    const paymentQrUrl = options?.paymentQrUrl?.trim();
     await postWebCallback({
         event: 'account_done',
         account: {
@@ -80,6 +81,7 @@ export async function notifyWebAccountSuccess(
             ...(typeof holdUntil === 'number' && holdUntil > 0 ? { holdUntil } : {}),
             ...(paymentLink ? { paymentLink } : {}),
             ...(paymentQr ? { paymentQr } : {}),
+            ...(paymentQrUrl ? { paymentQrUrl } : {}),
         },
     });
 }
@@ -89,12 +91,14 @@ export async function notifyWebPaymentLink(
     email: string,
     paymentLink: string,
     paymentQr?: string,
+    paymentQrUrl?: string,
 ): Promise<void> {
     const config = webCallbackConfig();
     if (!config) return;
     const link = paymentLink.trim();
     if (!link) return;
     const qr = paymentQr?.trim();
+    const qrUrl = paymentQrUrl?.trim();
     await postWebCallback({
         event: 'account_done',
         account: {
@@ -103,6 +107,7 @@ export async function notifyWebPaymentLink(
             ok: true,
             paymentLink: link,
             ...(qr ? { paymentQr: qr } : {}),
+            ...(qrUrl ? { paymentQrUrl: qrUrl } : {}),
         },
     });
 }
@@ -122,15 +127,18 @@ export async function finishAccountSuccess(
 
     const paymentLink = await extractAccountPaymentLink(accessToken, (message) => notifyWebProgress(message, email));
     let paymentQr: string | undefined;
+    let paymentQrUrl: string | undefined;
     if (paymentLink) {
         if (browser) {
             await notifyWebProgress('正在打开支付页获取二维码…', email);
-            paymentQr = await capturePaymentQrDataUrl(browser, paymentLink, proxyAuth);
+            const captured = await capturePaymentQr(browser, paymentLink, proxyAuth);
+            paymentQr = captured?.dataUrl;
+            paymentQrUrl = captured?.qrUrl;
             if (!paymentQr) {
                 await notifyWebProgress('支付链接已就绪，二维码获取失败', email).catch(() => undefined);
             }
         }
-        await notifyWebPaymentLink(email, paymentLink, paymentQr);
+        await notifyWebPaymentLink(email, paymentLink, paymentQr, paymentQrUrl);
     }
 
     // 提链完成后再开始「等待关闭」
@@ -140,6 +148,7 @@ export async function finishAccountSuccess(
         holdUntil,
         ...(paymentLink ? { paymentLink } : {}),
         ...(paymentQr ? { paymentQr } : {}),
+        ...(paymentQrUrl ? { paymentQrUrl } : {}),
     });
     await notifyWebProgress(`将保持约 ${holdMinutes} 分钟后关闭…`, email);
     await waitHoldMinutes(holdMinutes, holdUntil);

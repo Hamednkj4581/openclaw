@@ -219,7 +219,7 @@ export default function App() {
             initialValues={{
               forwarding_emails: FORWARDING_EMAIL_OPTIONS[0].value,
               enable_mfa: true,
-              proxy_region: 'none',
+              proxy_region: 'JP',
               payment_link_type: '未选择',
               payment_card: '',
             }}
@@ -248,18 +248,24 @@ export default function App() {
               <Form.Item label="代理地区" name="proxy_region" rules={[{ required: true, message: '请选择代理地区' }]}>
                 <Select style={{ width: 200 }} options={PROXY_REGION_OPTIONS} />
               </Form.Item>
-              <Form.Item label="支付提链" name="payment_link_type">
-                <Select style={{ width: 160 }} options={PAYMENT_LINK_OPTIONS} />
-              </Form.Item>
             </Space>
+            <Form.Item label="支付提链" name="payment_link_type">
+              <Select
+                style={{ width: 200 }}
+                options={PAYMENT_LINK_OPTIONS}
+                onChange={(value) => {
+                  if (value !== 'gcash') registerForm.setFieldValue('payment_card', '');
+                }}
+              />
+            </Form.Item>
             {registerPaymentType === 'gcash' ? (
               <Form.Item
-                label="oai9 卡密"
+                label="卡密"
                 name="payment_card"
                 rules={[{ required: true, message: '请填写卡密' }]}
-                extra="汇总阶段提交到 long.oai9.com 提取 GCash 链接"
+                extra="选择支付提链后必填，汇总阶段用于提取支付链接"
               >
-                <Input.Password placeholder="卡密" autoComplete="off" />
+                <Input.Password placeholder="请输入卡密" autoComplete="off" />
               </Form.Item>
             ) : null}
             <Button type="primary" htmlType="submit" icon={<PlayCircleOutlined />} loading={submitting} size="large">
@@ -272,8 +278,8 @@ export default function App() {
             layout="vertical"
             className="task-form"
             initialValues={{
-              proxy_region: 'none',
-              hold_minutes: 5,
+              proxy_region: 'JP',
+              hold_minutes: 15,
               payment_link_type: '未选择',
               payment_card: '',
             }}
@@ -294,18 +300,24 @@ export default function App() {
               <Form.Item label="延迟关闭" name="hold_minutes" rules={[{ required: true, message: '请选择延迟关闭时间' }]}>
                 <Select style={{ width: 140 }} options={HOLD_MINUTES_OPTIONS} />
               </Form.Item>
-              <Form.Item label="支付提链" name="payment_link_type">
-                <Select style={{ width: 160 }} options={PAYMENT_LINK_OPTIONS} />
-              </Form.Item>
             </Space>
+            <Form.Item label="支付提链" name="payment_link_type">
+              <Select
+                style={{ width: 200 }}
+                options={PAYMENT_LINK_OPTIONS}
+                onChange={(value) => {
+                  if (value !== 'gcash') loginForm.setFieldValue('payment_card', '');
+                }}
+              />
+            </Form.Item>
             {loginPaymentType === 'gcash' ? (
               <Form.Item
-                label="oai9 卡密"
+                label="卡密"
                 name="payment_card"
                 rules={[{ required: true, message: '请填写卡密' }]}
-                extra="汇总阶段提交到 long.oai9.com 提取 GCash 链接"
+                extra="选择支付提链后必填，汇总阶段用于提取支付链接"
               >
-                <Input.Password placeholder="卡密" autoComplete="off" />
+                <Input.Password placeholder="请输入卡密" autoComplete="off" />
               </Form.Item>
             ) : null}
             <Button type="primary" htmlType="submit" icon={<PlayCircleOutlined />} loading={submitting} size="large">

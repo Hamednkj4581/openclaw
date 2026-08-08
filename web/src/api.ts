@@ -30,7 +30,6 @@ export interface AccountStatus {
   paymentError?: string;
   paymentLink?: string;
   paymentQr?: string;
-  paymentQrUrl?: string;
   holdUntil?: number;
   logs?: ProgressLogEntry[];
 }

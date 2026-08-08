@@ -249,13 +249,6 @@ export default function App() {
   const waiting = Boolean(taskId && (!status || !status.done));
   const waitingTip = useWaitingTip(waiting);
 
-  const allPaymentQrUrls = useMemo(() => {
-    const rows = status?.accounts || [];
-    return rows
-      .map((account) => (account.paymentQrUrl || '').trim())
-      .filter(Boolean);
-  }, [status]);
-
   const allCredentialLines = useMemo(() => {
     const rows = status?.accounts || [];
     return rows
@@ -316,14 +309,6 @@ export default function App() {
   const copyText = async (text: string, okMessage = '已复制') => {
     await navigator.clipboard.writeText(text);
     message.success(okMessage);
-  };
-
-  const copyAllPaymentQrUrls = async () => {
-    if (!allPaymentQrUrls.length) {
-      message.warning('暂无二维码链接可复制');
-      return;
-    }
-    await copyText(allPaymentQrUrls.join('\n'), `已复制 ${allPaymentQrUrls.length} 条二维码链接`);
   };
 
   const copyAllCredentialLines = async () => {
@@ -507,22 +492,13 @@ export default function App() {
             strokeColor={{ from: '#0f766e', to: '#14b8a6' }}
           />
           <ProgressLogDetails logs={status?.logs} title="任务详情" />
-          {(allCredentialLines.length > 0 || allPaymentQrUrls.length > 0) && (
+          {allCredentialLines.length > 0 ? (
             <div className="bulk-copy-row">
-              <Space wrap>
-                {allCredentialLines.length ? (
-                  <Button icon={<CopyOutlined />} onClick={() => void copyAllCredentialLines()}>
-                    复制全部账号结果（{allCredentialLines.length}）
-                  </Button>
-                ) : null}
-                {allPaymentQrUrls.length ? (
-                  <Button icon={<CopyOutlined />} onClick={() => void copyAllPaymentQrUrls()}>
-                    复制全部二维码链接（{allPaymentQrUrls.length}）
-                  </Button>
-                ) : null}
-              </Space>
+              <Button icon={<CopyOutlined />} onClick={() => void copyAllCredentialLines()}>
+                复制全部账号结果（{allCredentialLines.length}）
+              </Button>
             </div>
-          )}
+          ) : null}
 
           {status?.accounts?.length ? (
             <div className="account-list">
@@ -602,23 +578,9 @@ export default function App() {
                             <img src={account.paymentQr} alt="支付二维码" width={168} height={168} />
                           </div>
                         </>
-                      ) : null}
-                      {account.paymentQrUrl ? (
-                        <>
-                          <Text strong>二维码链接</Text>
-                          <Space.Compact className="token-box">
-                            <Input value={account.paymentQrUrl} readOnly />
-                            <Button
-                              icon={<CopyOutlined />}
-                              onClick={() => void copyText(account.paymentQrUrl!, '已复制二维码链接')}
-                            >
-                              复制
-                            </Button>
-                          </Space.Compact>
-                        </>
-                      ) : account.paymentQr ? (
-                        <Text type="secondary">二维码图片已就绪，但未解析到链接</Text>
-                      ) : null}
+                      ) : (
+                        <Text type="secondary">支付链接已就绪，二维码图片未获取到</Text>
+                      )}
                     </div>
                   ) : null}
                   <AccountHoldCountdown holdUntil={account.holdUntil} />

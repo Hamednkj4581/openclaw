@@ -16,7 +16,6 @@ interface WebhookBody {
     otpSecret?: string;
     paymentLink?: string;
     paymentQr?: string;
-    paymentQrUrl?: string;
     paymentError?: string;
     error?: string;
     holdUntil?: number;
@@ -111,7 +110,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       delete row.otpSecret;
       delete row.paymentLink;
       delete row.paymentQr;
-      delete row.paymentQrUrl;
       delete row.paymentError;
       delete row.holdUntil;
       delete row.hint;
@@ -136,12 +134,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       const paymentQr = (body.account?.paymentQr || '').trim();
       if (paymentQr.startsWith('data:image')) {
         row.paymentQr = paymentQr;
-        if (paymentQr !== prevQr) appendProgressLog(row, '支付二维码已更新');
+        if (paymentQr !== prevQr) appendProgressLog(row, '支付二维码图片已更新');
       }
-      const paymentQrUrl = (body.account?.paymentQrUrl || '').trim();
-      if (paymentQrUrl) {
-        row.paymentQrUrl = paymentQrUrl;
-      }
+      // 不再接收/展示二维码短链
+      delete row.paymentQrUrl;
       const paymentErrorRaw = body.account?.paymentError;
       if (typeof paymentErrorRaw === 'string') {
         const paymentError = paymentErrorRaw.trim().slice(0, 160);

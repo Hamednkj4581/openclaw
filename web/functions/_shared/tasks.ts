@@ -35,7 +35,6 @@ export function publicStatus(state: TaskState) {
       paymentError: a.paymentError || undefined,
       paymentLink: a.paymentLink || undefined,
       paymentQr: a.paymentQr || undefined,
-      paymentQrUrl: a.paymentQrUrl || undefined,
       holdUntil: a.holdUntil || undefined,
       logs: a.logs || [],
     })),

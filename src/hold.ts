@@ -62,7 +62,7 @@ export async function notifyWebProgress(message: string, email?: string): Promis
     });
 }
 
-/** 成功后回传 access token（可附带注册密码/2FA、支付链接/二维码/提链失败原因；holdUntil 可选） */
+/** 成功后回传 access token（可附带注册密码/2FA、支付链接/二维码图/提链失败原因；holdUntil 可选） */
 export async function notifyWebAccountSuccess(
     email: string,
     accessToken: string,
@@ -72,7 +72,6 @@ export async function notifyWebAccountSuccess(
         otpSecret?: string;
         paymentLink?: string;
         paymentQr?: string;
-        paymentQrUrl?: string;
         paymentError?: string;
     }
 ): Promise<void> {
@@ -83,7 +82,6 @@ export async function notifyWebAccountSuccess(
     const otpSecret = options?.otpSecret?.trim();
     const paymentLink = options?.paymentLink?.trim();
     const paymentQr = options?.paymentQr?.trim();
-    const paymentQrUrl = options?.paymentQrUrl?.trim();
     const paymentError = options?.paymentError?.trim().slice(0, WEB_PROGRESS_MAX);
     if (process.env.GITHUB_ACTIONS === 'true') {
         if (password) console.log(`::add-mask::${password}`);
@@ -102,25 +100,22 @@ export async function notifyWebAccountSuccess(
             ...(otpSecret ? { otpSecret } : {}),
             ...(paymentLink ? { paymentLink } : {}),
             ...(paymentQr ? { paymentQr } : {}),
-            ...(paymentQrUrl ? { paymentQrUrl } : {}),
             ...(paymentError ? { paymentError } : {}),
         },
     });
 }
 
-/** 账号已成功后补传支付链接与页面内二维码 */
+/** 账号已成功后补传支付链接与页面内二维码图片 */
 export async function notifyWebPaymentLink(
     email: string,
     paymentLink: string,
     paymentQr?: string,
-    paymentQrUrl?: string,
 ): Promise<void> {
     const config = webCallbackConfig();
     if (!config) return;
     const link = paymentLink.trim();
     if (!link) return;
     const qr = paymentQr?.trim();
-    const qrUrl = paymentQrUrl?.trim();
     await postWebCallback({
         event: 'account_done',
         account: {
@@ -129,7 +124,6 @@ export async function notifyWebPaymentLink(
             ok: true,
             paymentLink: link,
             ...(qr ? { paymentQr: qr } : {}),
-            ...(qrUrl ? { paymentQrUrl: qrUrl } : {}),
         },
     });
 }
@@ -158,16 +152,14 @@ export async function finishAccountSuccess(
     const paymentLink = payment.link;
     let paymentError = payment.error;
     let paymentQr: string | undefined;
-    let paymentQrUrl: string | undefined;
     if (paymentLink) {
         if (browser) {
-            logger.info('提链成功，正在打开支付页提取二维码…');
+            logger.info('提链成功，正在打开支付页提取二维码图片…');
             await notifyWebProgress('正在打开支付页获取二维码…', email);
             const captured = await capturePaymentQr(browser, paymentLink, proxyAuth);
             paymentQr = captured?.dataUrl;
-            paymentQrUrl = captured?.qrUrl;
             if (!paymentQr) {
-                paymentError = '支付链接已就绪，但二维码获取失败';
+                paymentError = '支付链接已就绪，但二维码图片获取失败';
                 logger.warn(paymentError);
                 await notifyWebProgress(paymentError, email).catch(() => undefined);
             }
@@ -175,7 +167,7 @@ export async function finishAccountSuccess(
             paymentError = '提链成功但无浏览器实例，跳过二维码提取';
             logger.warn(paymentError);
         }
-        await notifyWebPaymentLink(email, paymentLink, paymentQr, paymentQrUrl);
+        await notifyWebPaymentLink(email, paymentLink, paymentQr);
     } else if (paymentError) {
         logger.info('提链未完成：%s', paymentError);
     } else {
@@ -192,7 +184,6 @@ export async function finishAccountSuccess(
         ...(otpSecret ? { otpSecret } : {}),
         ...(paymentLink ? { paymentLink } : {}),
         ...(paymentQr ? { paymentQr } : {}),
-        ...(paymentQrUrl ? { paymentQrUrl } : {}),
         ...(paymentError ? { paymentError } : {}),
     });
     if (holdMinutes > 0) {

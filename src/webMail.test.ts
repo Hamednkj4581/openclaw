@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { credentialsFromEnv } from './mailProvider.js';
 import { extractWebMailVerification } from './webMail.js';
+import { ai1998WebMailAdapter, resolveWebMailAdapter } from './webMailHosts.js';
 
 test('recognizes an HTTP(S) second field as a web mailbox URL', () => {
     process.env.EMAIL = 'sample@icloud.com';
@@ -38,6 +39,11 @@ test('reads forwarded Outlook mailbox credentials from MAILBOX_EMAIL', () => {
     });
 });
 
+test('resolves mail.ai1998.xyz adapter by hostname', () => {
+    assert.equal(resolveWebMailAdapter('mail.ai1998.xyz').id, 'mail.ai1998.xyz');
+    assert.equal(resolveWebMailAdapter('mail.example.com').id, 'default');
+});
+
 test('extracts a ChatGPT verification code from a server-rendered mailbox page', () => {
     const html = `
         <!doctype html><html><body>
@@ -61,4 +67,53 @@ test('extracts an OpenAI verification link from a mailbox page', () => {
         type: 'link',
         value: 'https://auth.openai.com/verify-email?token=test'
     });
+});
+
+test('ai1998 adapter extracts code from mail-card layout', () => {
+    const html = `
+      <!doctype html><html><body>
+      <div class="wrap">
+        <details class="mail-card">
+          <summary>
+            <span class="subject">Verify your email address</span>
+            <span class="date">just now</span>
+          </summary>
+          <div class="meta">OpenAI &lt;noreply@tm.openai.com&gt;</div>
+          <pre class="body">Your ChatGPT verification code is 482915</pre>
+        </details>
+      </div>
+      </body></html>`;
+    assert.deepEqual(
+        ai1998WebMailAdapter.extract(html, {
+            email: 'sorters.day4e@icloud.com',
+            mailboxUrl: 'https://mail.ai1998.xyz/messages/token/sorters.day4e%40icloud.com'
+        }),
+        { type: 'code', value: '482915' }
+    );
+    assert.deepEqual(
+        extractWebMailVerification(html, 'https://mail.ai1998.xyz/messages/token/x%40icloud.com'),
+        { type: 'code', value: '482915' }
+    );
+});
+
+test('ai1998 adapter extracts verify link from mail-card body', () => {
+    const html = `
+      <details class="mail-card">
+        <summary><span class="subject">Verify your email</span></summary>
+        <div class="meta">OpenAI</div>
+        <div class="body">ChatGPT <a href="https://auth.openai.com/verify-email?token=abc">Verify</a></div>
+      </details>`;
+    assert.deepEqual(
+        extractWebMailVerification(html, 'mail.ai1998.xyz'),
+        { type: 'link', value: 'https://auth.openai.com/verify-email?token=abc' }
+    );
+});
+
+test('ai1998 adapter ignores empty inbox without openai mail', () => {
+    const html = `
+      <div class="wrap">
+        <div class="count">当前只显示最近一封邮件，本页显示 0 封。</div>
+        <div class="empty">暂无邮件</div>
+      </div>`;
+    assert.equal(extractWebMailVerification(html, 'mail.ai1998.xyz'), undefined);
 });

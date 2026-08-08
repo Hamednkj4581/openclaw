@@ -1,12 +1,10 @@
 import axios from 'axios';
 import Utility from './Utility.js';
 import logger from './logger.js';
-import { ChatGptVerification, extractVerification, WaitForVerificationOptions } from './outlookMail.js';
+import { ChatGptVerification, WaitForVerificationOptions } from './outlookMail.js';
+import { resolveWebMailAdapter, type WebMailCredentials } from './webMailHosts.js';
 
-export interface WebMailCredentials {
-    email: string;
-    mailboxUrl: string;
-}
+export type { WebMailCredentials } from './webMailHosts.js';
 
 const DEFAULT_VERIFICATION_TIMEOUT_MS = 90_000;
 const baselineVerifications = new WeakMap<WebMailCredentials, string | undefined>();
@@ -101,9 +99,20 @@ async function fetchMailboxPage(credentials: WebMailCredentials): Promise<string
     }
 }
 
-export function extractWebMailVerification(html: string): ChatGptVerification | undefined {
-    if (!/(?:openai|chatgpt)/i.test(html)) return undefined;
-    return extractVerification('', '', html);
+/** 按取件链接域名选择适配器后提取验证信息 */
+export function extractWebMailVerification(html: string, mailboxUrlOrHost?: string): ChatGptVerification | undefined {
+    let hostname = '';
+    if (mailboxUrlOrHost) {
+        try {
+            hostname = mailboxUrlOrHost.includes('://')
+                ? new URL(mailboxUrlOrHost).hostname
+                : mailboxUrlOrHost;
+        } catch {
+            hostname = mailboxUrlOrHost;
+        }
+    }
+    const adapter = resolveWebMailAdapter(hostname);
+    return adapter.extract(html, { email: '', mailboxUrl: mailboxUrlOrHost || '' });
 }
 
 function verificationKey(verification: ChatGptVerification | undefined): string | undefined {
@@ -111,9 +120,11 @@ function verificationKey(verification: ChatGptVerification | undefined): string 
 }
 
 export async function preflightWebMail(credentials: WebMailCredentials): Promise<void> {
+    const url = validateCredentials(credentials);
+    const adapter = resolveWebMailAdapter(url.hostname);
     const html = await fetchMailboxPage(credentials);
-    baselineVerifications.set(credentials, verificationKey(extractWebMailVerification(html)));
-    logger.info('网页邮箱预检成功：%s，服务：%s', maskEmail(credentials.email), new URL(credentials.mailboxUrl).hostname);
+    baselineVerifications.set(credentials, verificationKey(adapter.extract(html, credentials)));
+    logger.info('网页邮箱预检成功：%s，服务：%s，适配器：%s', maskEmail(credentials.email), url.hostname, adapter.id);
 }
 
 export async function waitForWebMailVerification(
@@ -124,9 +135,10 @@ export async function waitForWebMailVerification(
     const pollIntervalMs = options.pollIntervalMs ?? 5_000;
     const deadline = Date.now() + timeoutMs;
     const baseline = baselineVerifications.get(credentials);
+    const adapter = resolveWebMailAdapter(new URL(credentials.mailboxUrl).hostname);
 
     while (Date.now() < deadline) {
-        const verification = extractWebMailVerification(await fetchMailboxPage(credentials));
+        const verification = adapter.extract(await fetchMailboxPage(credentials), credentials);
         if (verification && verificationKey(verification) !== baseline) return verification;
 
         const remainingMs = deadline - Date.now();

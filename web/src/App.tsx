@@ -526,9 +526,12 @@ export default function App() {
                   <div className="account-meta">
                     <Text strong>{account.email}</Text>
                     <Text type={account.ok === true ? 'success' : account.ok === false ? 'danger' : 'secondary'}>
-                      {account.ok === true ? '完成' : account.ok === false ? account.error || '失败' : '处理中…'}
+                      {account.ok === true ? '完成' : account.ok === false ? '失败' : '处理中…'}
                     </Text>
                   </div>
+                  {account.ok === false && account.error ? (
+                    <Paragraph className="account-payment-error">{account.error}</Paragraph>
+                  ) : null}
                   {account.hint ? <Paragraph className="account-hint">{account.hint}</Paragraph> : null}
                   {account.paymentError ? (
                     <Paragraph className="account-payment-error">{account.paymentError}</Paragraph>

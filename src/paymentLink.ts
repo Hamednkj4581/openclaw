@@ -186,6 +186,12 @@ function formatEligibilitySkip(eligibility: EligibilityResult): string {
     return `暂无支付资格（${parts.join('，')}）`;
 }
 
+/** 无支付资格等跳过提链后应直接结束 job（不进入保持等待） */
+export function shouldExitAfterPaymentSkip(error: string | undefined): boolean {
+    const message = (error || '').trim();
+    return /暂无支付资格|无支付资格/.test(message);
+}
+
 /** 提链失败给网页端的文案：只保留业务含义，不含接口/状态等技术细节 */
 function paymentFailureTipForWeb(raw: string): string {
     const message = raw.trim();

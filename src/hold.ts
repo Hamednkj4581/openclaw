@@ -3,7 +3,7 @@ import fs from 'fs';
 import Utility from './Utility.js';
 import logger from './logger.js';
 import { submitPaymentQrToGcPh, isGcPhEnabled } from './gcPhOrder.js';
-import { extractAccountPaymentLink, isPaymentLinkEnabled } from './paymentLink.js';
+import { extractAccountPaymentLink, isPaymentLinkEnabled, shouldExitAfterPaymentSkip } from './paymentLink.js';
 import { capturePaymentQr, type ProxyAuth } from './paymentQr.js';
 import { isChatGptPlusPlan } from './sessionExport.js';
 
@@ -183,6 +183,25 @@ export async function notifyWebSessionReady(
     await notifyWebProgress('accessToken 与 Cookie 已回传', email).catch(() => undefined);
 }
 
+type AccountCredentials = { password?: string; otpSecret?: string; planType?: string };
+
+/** Plus / 无支付资格等场景：回传提示后直接结束，不进入保持等待 */
+async function finishAccountEarly(
+    email: string,
+    accessToken: string,
+    hint: string,
+    credentials?: Pick<AccountCredentials, 'password' | 'otpSecret'>,
+): Promise<void> {
+    logger.info('%s，直接结束', hint);
+    await notifyWebProgress(hint, email).catch(() => undefined);
+    await notifyWebAccountSuccess(email, accessToken, {
+        ...(credentials?.password ? { password: credentials.password } : {}),
+        ...(credentials?.otpSecret ? { otpSecret: credentials.otpSecret } : {}),
+        hint,
+    });
+    await notifyWebProgress('即将关闭…', email).catch(() => undefined);
+}
+
 /**
  * 顺序：提链 → 打开提链页提取二维码 → 再开始保持等待关闭（token/cookie 由调用方提前回传）。
  * 提链/取码不得占用保持时长；取码成功后支付页保持打开，等保持时长到再随浏览器退出。
@@ -192,22 +211,18 @@ export async function finishAccountSuccess(
     accessToken: string,
     browser?: Browser | null,
     proxyAuth?: ProxyAuth | null,
-    credentials?: { password?: string; otpSecret?: string; planType?: string },
+    credentials?: AccountCredentials,
 ): Promise<void> {
     const password = credentials?.password?.trim();
     const otpSecret = credentials?.otpSecret?.trim();
     const planType = credentials?.planType?.trim();
+    const creds = {
+        ...(password ? { password } : {}),
+        ...(otpSecret ? { otpSecret } : {}),
+    };
 
     if (isChatGptPlusPlan(planType)) {
-        const plusHint = '该账号已是 ChatGPT Plus，已跳过提链';
-        logger.info('%s，直接结束', plusHint);
-        await notifyWebProgress(plusHint, email).catch(() => undefined);
-        await notifyWebAccountSuccess(email, accessToken, {
-            ...(password ? { password } : {}),
-            ...(otpSecret ? { otpSecret } : {}),
-            hint: plusHint,
-        });
-        await notifyWebProgress('即将关闭…', email).catch(() => undefined);
+        await finishAccountEarly(email, accessToken, '该账号已是 ChatGPT Plus，已跳过提链', creds);
         return;
     }
 
@@ -218,6 +233,10 @@ export async function finishAccountSuccess(
     const payment = await extractAccountPaymentLink(accessToken, (message) => notifyWebProgress(message, email));
     const paymentLink = payment.link;
     let paymentError = payment.error;
+    if (!paymentLink && shouldExitAfterPaymentSkip(paymentError)) {
+        await finishAccountEarly(email, accessToken, paymentError!.trim(), creds);
+        return;
+    }
     let paymentQr: string | undefined;
     if (paymentLink) {
         if (browser) {

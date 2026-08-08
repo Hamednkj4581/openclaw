@@ -158,17 +158,23 @@
   width: 100%;
 }
 
-.cookie-json-box {
-  align-items: flex-start;
+.cred-label-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.cookie-json-box .ant-input {
-  flex: 1;
+.cookie-json-collapse {
+  width: 100%;
 }
 
-.cookie-json-box .ant-btn {
-  height: auto;
-  align-self: stretch;
+.cookie-json-collapse .ant-collapse-header {
+  padding: 0 !important;
+  align-items: center !important;
+}
+
+.cookie-json-collapse .ant-collapse-content-box {
+  padding: 8px 0 0 !important;
 }
 
 .hold-countdown {

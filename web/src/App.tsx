@@ -1067,13 +1067,40 @@ export default function App() {
                   ) : null}
                   {account.cookiesJson ? (
                     <div className="cred-box">
-                      <Text strong>Cookie JSON</Text>
-                      <Space.Compact className="token-box cookie-json-box">
-                        <Input.TextArea value={account.cookiesJson} readOnly autoSize={{ minRows: 3, maxRows: 8 }} />
-                        <Button icon={<CopyOutlined />} onClick={() => void copyText(account.cookiesJson!, '已复制 Cookie JSON')}>
-                          复制
-                        </Button>
-                      </Space.Compact>
+                      <Collapse
+                        className="cookie-json-collapse"
+                        ghost
+                        size="small"
+                        expandIconPosition="end"
+                        defaultActiveKey={[]}
+                        items={[
+                          {
+                            key: 'json',
+                            label: (
+                              <span className="cred-label-row">
+                                <Button
+                                  size="small"
+                                  icon={<CopyOutlined />}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void copyText(account.cookiesJson!, '已复制 Cookie JSON');
+                                  }}
+                                >
+                                  复制
+                                </Button>
+                                <Text strong>Cookie JSON</Text>
+                              </span>
+                            ),
+                            children: (
+                              <Input.TextArea
+                                value={account.cookiesJson}
+                                readOnly
+                                autoSize={{ minRows: 3, maxRows: 8 }}
+                              />
+                            ),
+                          },
+                        ]}
+                      />
                     </div>
                   ) : null}
                   {account.password ? (

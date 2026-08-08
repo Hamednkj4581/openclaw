@@ -200,7 +200,6 @@ async function finishAccountEarly(
         hint,
     });
     await notifyWebProgress(hint, email).catch(() => undefined);
-    await notifyWebProgress('即将关闭…', email).catch(() => undefined);
 }
 
 /**
@@ -287,7 +286,6 @@ export async function finishAccountSuccess(
         await waitHoldMinutes(holdMinutes, holdUntil);
         await notifyWebProgress('保持结束，正在关闭…', email).catch(() => undefined);
     } else {
-        await notifyWebProgress('即将关闭…', email);
         logger.info('保持时长为 0，跳过等待直接退出');
     }
 }

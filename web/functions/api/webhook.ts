@@ -38,6 +38,14 @@ function isTerminal(phase: TaskPhase): boolean {
   return phase === 'done' || phase === 'failed' || phase === 'cancelled';
 }
 
+/** 收尾类进度只写日志，不覆盖 account_done 已回传的 hint */
+function shouldUpdateHintFromProgress(tip: string): boolean {
+  const text = tip.trim();
+  if (!text) return false;
+  if (/^(即将关闭|保持结束，正在关闭|将保持约 \d+ 分钟后关闭)/.test(text)) return false;
+  return true;
+}
+
 function summarizeProcessing(state: TaskState, tip: string): string {
   const total = state.total || state.accounts.length || 0;
   const doneCount = state.accounts.filter((a) => a.ok !== null).length;
@@ -119,7 +127,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         return json({ ok: true, ignored: true });
       }
       appendProgressLog(row, tip);
-      if (row.ok === null || row.ok === true) {
+      if ((row.ok === null || row.ok === true) && shouldUpdateHintFromProgress(tip)) {
         row.hint = tip;
       }
       await writeAccount(context.env, taskId, row);

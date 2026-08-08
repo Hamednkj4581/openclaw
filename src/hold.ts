@@ -185,20 +185,21 @@ export async function notifyWebSessionReady(
 
 type AccountCredentials = { password?: string; otpSecret?: string; planType?: string };
 
-/** Plus / 无支付资格等场景：回传提示后直接结束，不进入保持等待 */
+/** Plus / 无支付资格等场景：回传原因（hint）后直接结束，不进入保持等待 */
 async function finishAccountEarly(
     email: string,
     accessToken: string,
-    hint: string,
+    reason: string,
     credentials?: Pick<AccountCredentials, 'password' | 'otpSecret'>,
 ): Promise<void> {
+    const hint = reason.trim();
     logger.info('%s，直接结束', hint);
-    await notifyWebProgress(hint, email).catch(() => undefined);
     await notifyWebAccountSuccess(email, accessToken, {
         ...(credentials?.password ? { password: credentials.password } : {}),
         ...(credentials?.otpSecret ? { otpSecret: credentials.otpSecret } : {}),
         hint,
     });
+    await notifyWebProgress(hint, email).catch(() => undefined);
     await notifyWebProgress('即将关闭…', email).catch(() => undefined);
 }
 

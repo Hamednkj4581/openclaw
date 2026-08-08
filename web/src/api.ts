@@ -12,6 +12,7 @@ export interface TriggerPayload {
   proxy_links?: string;
   payment_link_type?: string;
   payment_card?: string;
+  gc_ph_api_key?: string;
   hold_minutes?: number;
 }
 

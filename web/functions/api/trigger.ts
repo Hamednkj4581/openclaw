@@ -18,6 +18,7 @@ interface TriggerBody {
   proxy_links?: string;
   payment_link_type?: string;
   payment_card?: string;
+  gc_ph_api_key?: string;
   hold_minutes?: number | string;
 }
 
@@ -58,6 +59,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   if (paymentLinkType === 'gcash' && !paymentCard) {
     return friendlyError(400, '选择 gcash 时请填写卡密');
   }
+  // 可选；有值才在提链截屏后走菲律宾通道，未传则跳过
+  const gcPhApiKey = paymentLinkType === 'gcash' ? (body.gc_ph_api_key || '').trim() : '';
 
   const proxyRegionRaw = (body.proxy_region || '').trim().toUpperCase();
   const enableProxy =
@@ -105,6 +108,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     proxy_links: enableProxy && !use711Account ? proxyLinks : '',
     payment_link_type: paymentLinkType,
     payment_card: paymentLinkType === 'gcash' ? paymentCard : '',
+    gc_ph_api_key: gcPhApiKey,
     hold_minutes: holdMinutes,
   };
 

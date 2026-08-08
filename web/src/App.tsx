@@ -60,6 +60,7 @@ type PersistedSettings = {
   hold_minutes: number;
   payment_link_type: string;
   payment_card: string;
+  gc_ph_api_key: string;
 };
 
 const DEFAULT_SETTINGS: PersistedSettings = {
@@ -69,6 +70,7 @@ const DEFAULT_SETTINGS: PersistedSettings = {
   hold_minutes: 15,
   payment_link_type: '未选择',
   payment_card: '',
+  gc_ph_api_key: '',
 };
 
 function emptyProxyStore(region = 'JP'): ProxyStore {
@@ -175,6 +177,7 @@ function readSettings(): PersistedSettings {
           ? parsed.payment_link_type
           : DEFAULT_SETTINGS.payment_link_type,
       payment_card: typeof parsed.payment_card === 'string' ? parsed.payment_card : '',
+      gc_ph_api_key: typeof parsed.gc_ph_api_key === 'string' ? parsed.gc_ph_api_key : '',
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -212,6 +215,7 @@ interface TaskFormValues {
   hold_minutes: number;
   payment_link_type: string;
   payment_card: string;
+  gc_ph_api_key: string;
 }
 
 function isProxyEnabled(region: string | undefined): boolean {
@@ -231,6 +235,7 @@ function persistFormSettings(values: Partial<TaskFormValues>, mode: TaskMode): v
       ? { payment_link_type: values.payment_link_type }
       : {}),
     ...(typeof values.payment_card === 'string' ? { payment_card: values.payment_card } : {}),
+    ...(typeof values.gc_ph_api_key === 'string' ? { gc_ph_api_key: values.gc_ph_api_key } : {}),
   });
   if (isProxyEnabled(values.proxy_region)) {
     saveProxyRegionState(values.proxy_region!, {
@@ -372,6 +377,7 @@ export default function App() {
       hold_minutes: settings.hold_minutes,
       payment_link_type: settings.payment_link_type,
       payment_card: settings.payment_card,
+      gc_ph_api_key: settings.gc_ph_api_key,
       proxy_region: resolvedRegion,
       proxy_type: resolvedType,
       proxy_username: resolvedRegion === 'none' ? '' : creds.username || '',
@@ -451,6 +457,7 @@ export default function App() {
         proxy_links: proxyEnabled && !use711 ? (values.proxy_links || '').trim() : '',
         payment_link_type: values.payment_link_type,
         payment_card: values.payment_card,
+        gc_ph_api_key: values.payment_link_type === 'gcash' ? values.gc_ph_api_key || '' : '',
         hold_minutes: [0, 5, 10, 15, 30].includes(Number(values.hold_minutes))
           ? Number(values.hold_minutes)
           : 15,
@@ -574,6 +581,7 @@ export default function App() {
             hold_minutes: savedSettings.hold_minutes,
             payment_link_type: savedSettings.payment_link_type,
             payment_card: savedSettings.payment_card,
+            gc_ph_api_key: savedSettings.gc_ph_api_key,
           }}
           onValuesChange={(_, all) => {
             if (waiting) return;
@@ -761,14 +769,26 @@ export default function App() {
               style={{ width: 200 }}
               options={PAYMENT_LINK_OPTIONS}
               onChange={(value) => {
-                if (value !== 'gcash') form.setFieldValue('payment_card', '');
+                if (value !== 'gcash') {
+                  form.setFieldValue('payment_card', '');
+                  form.setFieldValue('gc_ph_api_key', '');
+                }
               }}
             />
           </Form.Item>
           {paymentLinkType === 'gcash' ? (
-            <Form.Item label="卡密" name="payment_card" rules={[{ required: true, message: '请填写卡密' }]}>
-              <Input.Password placeholder="请输入卡密" autoComplete="off" />
-            </Form.Item>
+            <>
+              <Form.Item label="卡密" name="payment_card" rules={[{ required: true, message: '请填写卡密' }]}>
+                <Input.Password placeholder="请输入卡密" autoComplete="off" />
+              </Form.Item>
+              <Form.Item
+                label="支付通道密钥"
+                name="gc_ph_api_key"
+                extra="选填。填写后会把支付二维码提交到对方通道并跟踪进度；不填则跳过。"
+              >
+                <Input.Password placeholder="不填则跳过提交" autoComplete="off" />
+              </Form.Item>
+            </>
           ) : null}
 
           <Space wrap className="submit-row">

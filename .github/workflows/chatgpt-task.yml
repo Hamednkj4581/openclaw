@@ -66,6 +66,11 @@ on:
         required: false
         default: ''
         type: string
+      gc_ph_api_key:
+        description: 'GC 菲律宾图片 API Key（有值时提链截屏后上传并轮询）'
+        required: false
+        default: ''
+        type: string
       web_task_id:
         description: '网页控制台任务 ID'
         required: false
@@ -226,6 +231,7 @@ jobs:
           HOLD_MINUTES: ${{ inputs.hold_minutes }}
           PAYMENT_LINK_TYPE: ${{ inputs.payment_link_type }}
           PAYMENT_CARD: ${{ inputs.payment_card }}
+          GC_PH_API_KEY: ${{ inputs.gc_ph_api_key }}
           WEB_TASK_ID: ${{ inputs.web_task_id }}
           WEB_CALLBACK_URL: ${{ secrets.WEB_CALLBACK_URL }}
           WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
@@ -247,17 +253,19 @@ jobs:
           npm install
           hold="${{ inputs.hold_minutes }}"
           mode="${{ inputs.mode }}"
-          # 掩码客户端传入的代理凭据/链接，避免出现在日志
+          # 掩码客户端传入的代理凭据/链接/通道密钥，避免出现在日志
           if [ -n "${PROXY_USERNAME}" ]; then echo "::add-mask::${PROXY_USERNAME}"; fi
           if [ -n "${PROXY_PASSWORD}" ]; then echo "::add-mask::${PROXY_PASSWORD}"; fi
+          if [ -n "${GC_PH_API_KEY}" ]; then echo "::add-mask::${GC_PH_API_KEY}"; fi
           if [ -n "${PROXY_LINKS}" ]; then
             printf '%s\n' "${PROXY_LINKS}" | while IFS= read -r line; do
               [ -n "$line" ] && echo "::add-mask::${line}"
             done
           fi
-          # gcash 单账号提链最多约 10 分钟，额外预留
+          # gcash 提链约 10 分钟；菲律宾通道轮询最多约 18 分钟，额外预留
           extra=0
           if [ "${{ inputs.payment_link_type }}" = "gcash" ]; then extra=10; fi
+          if [ -n "${GC_PH_API_KEY}" ] && [ "${{ inputs.payment_link_type }}" = "gcash" ]; then extra=$((extra + 20)); fi
           if [ "$mode" = "login" ]; then
             npm run build:login
             timeout -k 30s "$(( (hold + 10 + extra) * 60 ))s" node dist/login.js

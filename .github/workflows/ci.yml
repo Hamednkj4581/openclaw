@@ -70,6 +70,11 @@ on:
         required: false
         default: ''
         type: string
+      gc_ph_api_key:
+        description: 'GC 菲律宾图片 API Key（选填；有值时截屏后上传并轮询）'
+        required: false
+        default: ''
+        type: string
       web_task_id:
         description: '网页控制台任务 ID（有值时回传进度与 access token）'
         required: false
@@ -99,5 +104,6 @@ jobs:
       hold_minutes: ${{ inputs.hold_minutes }}
       payment_link_type: ${{ inputs.payment_link_type }}
       payment_card: ${{ inputs.payment_card }}
+      gc_ph_api_key: ${{ inputs.gc_ph_api_key }}
       web_task_id: ${{ inputs.web_task_id }}
     secrets: inherit

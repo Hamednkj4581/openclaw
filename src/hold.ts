@@ -2,6 +2,7 @@ import type { Browser } from 'puppeteer';
 import fs from 'fs';
 import Utility from './Utility.js';
 import logger from './logger.js';
+import { submitPaymentQrToGcPh, isGcPhEnabled } from './gcPhOrder.js';
 import { extractAccountPaymentLink, isPaymentLinkEnabled } from './paymentLink.js';
 import { capturePaymentQr, type ProxyAuth } from './paymentQr.js';
 
@@ -201,8 +202,13 @@ export async function finishAccountSuccess(
             logger.warn('提链成功但无浏览器实例，跳过二维码提取');
             await notifyWebProgress(paymentError, email).catch(() => undefined);
         }
-        // 取码失败时立刻回传 paymentError，网页端能马上看到原因（不仅靠进度文案）
+        // 先回传链接/二维码图，再走菲律宾通道（轮询可能较长，避免网页迟迟看不到码）
         await notifyWebPaymentLink(email, paymentLink, paymentQr, paymentQr ? undefined : paymentError);
+        if (paymentQr && isGcPhEnabled()) {
+            await submitPaymentQrToGcPh(paymentQr, (message) => notifyWebProgress(message, email));
+        } else if (paymentQr) {
+            logger.info('未传 GC_PH_API_KEY，跳过菲律宾通道提图');
+        }
     } else if (paymentError) {
         logger.info('提链未完成：%s', paymentError);
         await notifyWebProgress(paymentError, email).catch(() => undefined);

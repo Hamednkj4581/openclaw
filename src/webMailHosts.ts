@@ -68,9 +68,26 @@ export const ai1998WebMailAdapter: WebMailHostAdapter = {
     }
 };
 
+/**
+ * /show/{token}/{email} 单页取件（如 mail.20000408.xyz）：
+ * 空箱为 “No latest mail found”；有信时服务端渲染整页，走通用抽取。
+ * 同结构域名可并入 hosts。
+ */
+export const showPathWebMailAdapter: WebMailHostAdapter = {
+    id: 'show-path',
+    hosts: ['mail.20000408.xyz'],
+    extract(content, credentials) {
+        if (/No latest mail found/i.test(content)) return undefined;
+        // 优先解析 <main>，减少脚本/页脚干扰；无 main 则整页
+        const main = content.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1] ?? content;
+        return defaultWebMailAdapter.extract(main, credentials);
+    }
+};
+
 /** 已注册适配器（默认兜底放最后） */
 const WEB_MAIL_HOST_ADAPTERS: WebMailHostAdapter[] = [
     ai1998WebMailAdapter,
+    showPathWebMailAdapter,
     defaultWebMailAdapter,
 ];
 

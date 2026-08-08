@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { credentialsFromEnv } from './mailProvider.js';
-import { extractWebMailVerification } from './webMail.js';
-import { ai1998WebMailAdapter, resolveWebMailAdapter } from './webMailHosts.js';
+import { extractWebMailVerification, pageMentionsEmail } from './webMail.js';
+import { ai1998WebMailAdapter, resolveWebMailAdapter, showPathWebMailAdapter } from './webMailHosts.js';
 
 test('recognizes an HTTP(S) second field as a web mailbox URL', () => {
     process.env.EMAIL = 'sample@icloud.com';
@@ -42,6 +42,11 @@ test('reads forwarded Outlook mailbox credentials from MAILBOX_EMAIL', () => {
 test('resolves mail.ai1998.xyz adapter by hostname', () => {
     assert.equal(resolveWebMailAdapter('mail.ai1998.xyz').id, 'mail.ai1998.xyz');
     assert.equal(resolveWebMailAdapter('mail.example.com').id, 'default');
+});
+
+test('resolves mail.20000408.xyz to show-path adapter', () => {
+    assert.equal(resolveWebMailAdapter('mail.20000408.xyz').id, 'show-path');
+    assert.equal(resolveWebMailAdapter('MAIL.20000408.XYZ').id, 'show-path');
 });
 
 test('extracts a ChatGPT verification code from a server-rendered mailbox page', () => {
@@ -116,4 +121,44 @@ test('ai1998 adapter ignores empty inbox without openai mail', () => {
         <div class="empty">暂无邮件</div>
       </div>`;
     assert.equal(extractWebMailVerification(html, 'mail.ai1998.xyz'), undefined);
+});
+
+test('pageMentionsEmail decodes Cloudflare protected addresses', () => {
+    // spouted-24-grouse@icloud.com
+    const html = `<p><a class="__cf_email__" data-cfemail="ef9c9f809a9b8a8bc2dddbc2889d809a9c8aaf868c83809a8bc18c8082">[email&#160;protected]</a></p>`;
+    assert.equal(pageMentionsEmail(html, 'spouted-24-grouse@icloud.com'), true);
+    assert.equal(pageMentionsEmail(html, 'other@icloud.com'), false);
+    assert.equal(pageMentionsEmail('<p>plain@icloud.com</p>', 'plain@icloud.com'), true);
+});
+
+test('show-path adapter ignores empty No latest mail found page', () => {
+    const html = `
+      <!doctype html><html><body>
+      <main><h2>No latest mail found</h2>
+      <p><a class="__cf_email__" data-cfemail="ef9c9f809a9b8a8bc2dddbc2889d809a9c8aaf868c83809a8bc18c8082">[email&#160;protected]</a></p>
+      </main></body></html>`;
+    assert.equal(
+        showPathWebMailAdapter.extract(html, {
+            email: 'spouted-24-grouse@icloud.com',
+            mailboxUrl: 'https://mail.20000408.xyz/show/token/spouted-24-grouse@icloud.com'
+        }),
+        undefined
+    );
+    assert.equal(extractWebMailVerification(html, 'mail.20000408.xyz'), undefined);
+});
+
+test('show-path adapter extracts code from main content', () => {
+    const html = `
+      <!doctype html><html><body>
+      <main>
+        <h2>Verify your email</h2>
+        <p>OpenAI &lt;noreply@tm.openai.com&gt;</p>
+        <div>Your ChatGPT verification code is 619384</div>
+      </main>
+      <script>/* noise 123456 */</script>
+      </body></html>`;
+    assert.deepEqual(
+        extractWebMailVerification(html, 'https://mail.20000408.xyz/show/t/x@icloud.com'),
+        { type: 'code', value: '619384' }
+    );
 });

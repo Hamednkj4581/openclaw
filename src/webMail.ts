@@ -34,6 +34,33 @@ function webMailError(credentials: WebMailCredentials, stage: string, category: 
     return new Error(`WEB_MAIL ${JSON.stringify(details)}`);
 }
 
+/** 解码 Cloudflare Email Protection 的 data-cfemail */
+function decodeCloudflareEmail(hex: string): string | undefined {
+    try {
+        const bytes = Buffer.from(hex, 'hex');
+        if (bytes.length < 2) return undefined;
+        const key = bytes[0]!;
+        let out = '';
+        for (let i = 1; i < bytes.length; i++) out += String.fromCharCode(bytes[i]! ^ key);
+        return out;
+    } catch {
+        return undefined;
+    }
+}
+
+/** 页面是否提及目标邮箱（明文、URL 编码，或 Cloudflare 混淆） */
+export function pageMentionsEmail(html: string, email: string): boolean {
+    const emailLower = email.toLowerCase();
+    const lower = html.toLowerCase();
+    if (lower.includes(emailLower) || lower.includes(encodeURIComponent(email).toLowerCase()))
+        return true;
+    for (const match of html.matchAll(/\bdata-cfemail=["']([0-9a-fA-F]+)["']/g)) {
+        const decoded = decodeCloudflareEmail(match[1]!);
+        if (decoded?.toLowerCase() === emailLower) return true;
+    }
+    return false;
+}
+
 function validateCredentials(credentials: WebMailCredentials): URL {
     if (!/^\S+@\S+\.\S+$/.test(credentials.email))
         throw webMailError(credentials, 'input_validation', 'invalid_email', new Error('邮箱格式无效'), false, '修正网页取件账号输入格式');
@@ -76,8 +103,7 @@ async function fetchMailboxPage(credentials: WebMailCredentials): Promise<string
         });
         if (typeof data !== 'string' || !/<(?:!doctype|html|body)\b/i.test(data))
             throw new Error('网页取件链接返回内容不是 HTML');
-        if (!data.toLowerCase().includes(credentials.email.toLowerCase())
-            && !data.toLowerCase().includes(encodeURIComponent(credentials.email).toLowerCase()))
+        if (!pageMentionsEmail(data, credentials.email))
             throw new Error('网页内容与当前邮箱不匹配');
         return data;
     }

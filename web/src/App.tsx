@@ -6,6 +6,7 @@ import {
   Collapse,
   Form,
   Input,
+  Modal,
   Progress,
   Radio,
   Select,
@@ -14,8 +15,8 @@ import {
   Typography,
   message,
 } from 'antd';
-import { CopyOutlined, PlayCircleOutlined } from '@ant-design/icons';
-import { fetchStatus, triggerTask, type ProgressLogEntry, type TaskMode, type TaskStatus } from './api';
+import { CopyOutlined, PlayCircleOutlined, StopOutlined } from '@ant-design/icons';
+import { cancelTask, fetchStatus, triggerTask, type ProgressLogEntry, type TaskMode, type TaskStatus } from './api';
 import './App.css';
 
 const { Title, Paragraph, Text } = Typography;
@@ -256,12 +257,14 @@ const phasePercent: Record<TaskStatus['phase'], number> = {
   processing: 55,
   done: 100,
   failed: 100,
+  cancelled: 100,
 };
 
 export default function App() {
   const savedSettings = useMemo(() => readSettings(), []);
   const [mode, setMode] = useState<TaskMode>(savedSettings.mode);
   const [submitting, setSubmitting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [runName, setRunName] = useState<string | null>(null);
   const [status, setStatus] = useState<TaskStatus | null>(null);
@@ -391,6 +394,32 @@ export default function App() {
     message.success(okMessage);
   };
 
+  const onCancelTask = () => {
+    if (!taskId || !waiting) return;
+    Modal.confirm({
+      title: '取消当前任务？',
+      content: '将尝试取消对应的 GitHub Actions 运行，进行中的账号会中止。',
+      okText: '确认取消',
+      okButtonProps: { danger: true },
+      cancelText: '返回',
+      onOk: async () => {
+        setCancelling(true);
+        try {
+          const result = await cancelTask(taskId);
+          message.success(result.message || '已取消');
+          const next = await fetchStatus(taskId);
+          setStatus(next);
+          if (next.runName) setRunName(next.runName);
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : '取消失败');
+          throw error;
+        } finally {
+          setCancelling(false);
+        }
+      },
+    });
+  };
+
   const copyAllCredentialLines = async () => {
     if (!allCredentialLines.length) {
       message.warning('暂无账号密码可复制');
@@ -428,6 +457,7 @@ export default function App() {
           optionType="button"
           buttonStyle="solid"
           value={mode}
+          disabled={waiting || cancelling}
           onChange={(e) => {
             const next = e.target.value as TaskMode;
             setMode(next);
@@ -443,6 +473,7 @@ export default function App() {
           form={form}
           layout="vertical"
           className="task-form"
+          disabled={waiting || cancelling}
           initialValues={{
             forwarding_emails: savedSettings.forwarding_emails,
             enable_mfa: savedSettings.enable_mfa,
@@ -453,6 +484,7 @@ export default function App() {
             payment_card: savedSettings.payment_card,
           }}
           onValuesChange={(_, all) => {
+            if (waiting) return;
             persistFormSettings(all, mode);
           }}
           onFinish={onSubmit}
@@ -563,17 +595,33 @@ export default function App() {
             </Form.Item>
           ) : null}
 
-          <Button
-            type="primary"
-            htmlType="submit"
-            icon={<PlayCircleOutlined />}
-            loading={submitBusy}
-            disabled={waiting}
-            size="large"
-          >
-            {waiting ? '任务进行中…' : mode === 'register' ? '开始注册' : '开始登录'}
-          </Button>
+          <Space wrap className="submit-row">
+            <Button
+              type="primary"
+              htmlType="submit"
+              icon={<PlayCircleOutlined />}
+              loading={submitBusy}
+              disabled={waiting || cancelling}
+              size="large"
+            >
+              {waiting ? '任务进行中…' : mode === 'register' ? '开始注册' : '开始登录'}
+            </Button>
+          </Space>
         </Form>
+        {waiting ? (
+          <div className="submit-row">
+            <Button
+              danger
+              icon={<StopOutlined />}
+              loading={cancelling}
+              disabled={cancelling}
+              size="large"
+              onClick={onCancelTask}
+            >
+              取消任务
+            </Button>
+          </div>
+        ) : null}
       </Card>
 
       {taskId && (
@@ -598,7 +646,13 @@ export default function App() {
           {waitingTip ? <Paragraph className="status-tip">{waitingTip}</Paragraph> : null}
           <Progress
             percent={progress}
-            status={status?.phase === 'failed' ? 'exception' : status?.done ? 'success' : 'active'}
+            status={
+              status?.phase === 'failed' || status?.phase === 'cancelled'
+                ? 'exception'
+                : status?.done
+                  ? 'success'
+                  : 'active'
+            }
             strokeColor={{ from: '#0f766e', to: '#14b8a6' }}
           />
           <ProgressLogDetails logs={status?.logs} title="任务详情" />

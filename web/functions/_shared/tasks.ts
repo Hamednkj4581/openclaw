@@ -39,7 +39,7 @@ export function publicStatus(state: TaskState) {
       holdUntil: a.holdUntil || undefined,
       logs: a.logs || [],
     })),
-    done: state.phase === 'done' || state.phase === 'failed',
+    done: state.phase === 'done' || state.phase === 'failed' || state.phase === 'cancelled',
     success: state.phase === 'done',
   };
 }

@@ -6,6 +6,15 @@ function workflowFile(mode: TaskMode): string {
   return mode === 'register' ? 'ci.yml' : 'login.yml';
 }
 
+function githubHeaders(env: Env): HeadersInit {
+  return {
+    Authorization: `Bearer ${env.GITHUB_PAT}`,
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': API_VERSION,
+    'User-Agent': 'gpt-web-console',
+  };
+}
+
 export async function dispatchWorkflow(
   env: Env,
   mode: TaskMode,
@@ -18,10 +27,7 @@ export async function dispatchWorkflow(
   const response = await fetch(url, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${env.GITHUB_PAT}`,
-      Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': API_VERSION,
-      'User-Agent': 'gpt-web-console',
+      ...githubHeaders(env),
       'Content-Type': 'application/json; charset=utf-8',
     },
     body: JSON.stringify({
@@ -34,6 +40,49 @@ export async function dispatchWorkflow(
     // 不把 GitHub 原始响应透传给浏览器
     throw new Error('trigger_failed');
   }
+}
+
+type WorkflowRun = {
+  id: number;
+  name?: string;
+  display_title?: string;
+  status?: string;
+  conclusion?: string | null;
+};
+
+/** 按 run-name（commit_message）查找最近的 Actions 运行 */
+export async function findWorkflowRunByName(
+  env: Env,
+  mode: TaskMode,
+  runName: string,
+): Promise<WorkflowRun | null> {
+  const name = runName.trim();
+  if (!name) return null;
+  const url =
+    `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}` +
+    `/actions/workflows/${workflowFile(mode)}/runs?per_page=30&event=workflow_dispatch`;
+  const response = await fetch(url, { headers: githubHeaders(env) });
+  if (!response.ok) return null;
+  const payload = (await response.json()) as { workflow_runs?: WorkflowRun[] };
+  const rows = Array.isArray(payload.workflow_runs) ? payload.workflow_runs : [];
+  return (
+    rows.find((row) => (row.display_title || '').trim() === name || (row.name || '').trim() === name) ||
+    null
+  );
+}
+
+/** 取消进行中的 Actions 运行；已结束则视为成功 */
+export async function cancelWorkflowRun(env: Env, runId: number): Promise<void> {
+  const url =
+    `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}` +
+    `/actions/runs/${runId}/cancel`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: githubHeaders(env),
+  });
+  // 202 已受理；409 常见于已结束
+  if (response.status === 202 || response.status === 409) return;
+  if (!response.ok) throw new Error('cancel_failed');
 }
 
 export function commitMessage(mode: TaskMode): string {

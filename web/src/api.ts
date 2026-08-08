@@ -36,7 +36,7 @@ export interface AccountStatus {
 
 export interface TaskStatus {
   ok: boolean;
-  phase: 'submitted' | 'processing' | 'done' | 'failed';
+  phase: 'submitted' | 'processing' | 'done' | 'failed' | 'cancelled';
   message: string;
   /** 与 GitHub Actions run-name 一致 */
   runName?: string;
@@ -69,5 +69,14 @@ export async function triggerTask(
 
 export async function fetchStatus(taskId: string): Promise<TaskStatus> {
   const response = await fetch(`/api/status?taskId=${encodeURIComponent(taskId)}`);
+  return readJson(response);
+}
+
+export async function cancelTask(taskId: string): Promise<{ message: string; phase?: string }> {
+  const response = await fetch('/api/cancel', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ taskId }),
+  });
   return readJson(response);
 }

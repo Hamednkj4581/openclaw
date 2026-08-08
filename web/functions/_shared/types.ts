@@ -1,5 +1,5 @@
 export type TaskMode = 'register' | 'login';
-export type TaskPhase = 'submitted' | 'processing' | 'done' | 'failed';
+export type TaskPhase = 'submitted' | 'processing' | 'done' | 'failed' | 'cancelled';
 
 /** 账号进度时间线条目 */
 export interface ProgressLogEntry {

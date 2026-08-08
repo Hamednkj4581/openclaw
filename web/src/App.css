@@ -113,8 +113,8 @@
   word-break: break-word;
 }
 
-.bulk-copy-row {
-  margin: 4px 0 12px;
+.submit-row {
+  margin-top: 8px;
 }
 
 .task-id-box {

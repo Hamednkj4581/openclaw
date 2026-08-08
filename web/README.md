@@ -62,7 +62,8 @@ python web/scripts/deploy_and_sync_webhook.py
 
 | 路径 | 说明 |
 |------|------|
-| `POST /api/trigger` | 提交任务，返回 `taskId` |
+| `POST /api/trigger` | 提交任务，返回 `taskId` / `runName` |
+| `POST /api/cancel` | 取消进行中的任务（按 run-name 取消 Actions） |
 | `POST /api/webhook` | Actions 回调（`X-Webhook-Secret`） |
 | `GET /api/status?taskId=` | 友好进度 + 已完成账号的 access token |
 

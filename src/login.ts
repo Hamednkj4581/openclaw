@@ -22,13 +22,14 @@ import {
     SIGNUP_SELECTORS,
 } from './selectors.js';
 import { parseLoginAccount } from './loginAccount.js';
-import { cookieFileNameForEmail, writeCookieEditorJson } from './cookieExport.js';
+import { buildCookieEditorJson, cookieFileNameForEmail, writeCookieEditorJson } from './cookieExport.js';
 import { credentialsFromLoginEnv, preflightMail, waitForMailVerification } from './mailProvider.js';
 import {
     finishAccountSuccess,
     notifyWebAccountFailure,
     notifyWebProgress,
     notifyWebAccountSuccess,
+    notifyWebSessionReady,
     resolveHoldMinutes,
     waitHoldMinutes,
 } from './hold.js';
@@ -548,7 +549,12 @@ function writeAccountCookies(email: string, cookies: Awaited<ReturnType<Page['co
             );
 
         logger.info('已打印 access token（Base64）');
-        writeAccountCookies(account.email, await page.cookies());
+        const pageCookies = await page.cookies();
+        writeAccountCookies(account.email, pageCookies);
+        const cookiesJson = buildCookieEditorJson(pageCookies);
+        await notifyWebSessionReady(account.email, accessToken, cookiesJson, {
+            ...(account.otpSecret ? { otpSecret: account.otpSecret } : {}),
+        });
 
         if (isBindPhoneMode()) {
             const bind = await bindPhoneWithRetry(
@@ -559,6 +565,7 @@ function writeAccountCookies(email: string, cookies: Awaited<ReturnType<Page['co
             const holdMinutes = resolveHoldMinutes();
             const holdUntil = holdMinutes > 0 ? Date.now() + holdMinutes * 60 * 1000 : 0;
             await notifyWebAccountSuccess(account.email, accessToken, {
+                cookiesJson,
                 otpSecret: account.otpSecret,
                 ...(bind.phoneNumber ? { phoneNumber: bind.phoneNumber } : {}),
                 ...(bind.error ? { phoneBindError: bind.error } : {}),

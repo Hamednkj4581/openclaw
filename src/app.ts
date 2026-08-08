@@ -14,8 +14,8 @@ import { installTurnstileHook, solveCloudflareIfPresent, validateCapSolver } fro
 import { installNetworkCapture } from './networkCapture.js';
 import { buildStickyProxyFromEnv, buildProxyPacUrl, is711ProxyEnabled, preflightProxy, rotateStickySession } from './proxy.js';
 import { AUTHENTICATED_SELECTORS, CONTINUE_SELECTORS, LOGIN_SELECTORS, MFA_CHALLENGE_SELECTORS, MFA_CODE_SELECTORS, MFA_ENABLED_SELECTORS, MFA_VERIFY_SELECTORS, SIGNUP_EMAIL_SELECTORS, SIGNUP_SELECTORS } from './selectors.js';
-import { cookieFileNameForEmail, writeCookieEditorJson } from './cookieExport.js';
-import { finishAccountSuccess, notifyWebAccountFailure, notifyWebProgress } from './hold.js';
+import { buildCookieEditorJson, cookieFileNameForEmail, writeCookieEditorJson } from './cookieExport.js';
+import { finishAccountSuccess, notifyWebAccountFailure, notifyWebAccountSuccess, notifyWebProgress, notifyWebSessionReady } from './hold.js';
 
 const MAX_TIMEOUT = Math.pow(2, 31) - 1;
 const EVIDENCE_TIMEOUT_MS = 15_000;
@@ -795,7 +795,10 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
         sensitiveValues.add(session.accessToken);
         sensitiveValues.add(session.sessionToken);
         writeSessionJson(session);
-        writeAccountCookies(email, await page.cookies());
+        const pageCookies = await page.cookies();
+        writeAccountCookies(email, pageCookies);
+        const cookiesJson = buildCookieEditorJson(pageCookies);
+        await notifyWebSessionReady(email, session.accessToken, cookiesJson, { password: chatGptPassword });
         await evidence(page, 'access-token-ready');
 
         let otpSecret: string | undefined;
@@ -803,6 +806,9 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
             try {
                 await notifyWebProgress('正在开启两步验证…', email);
                 otpSecret = await enableMfa(page, evidence);
+                if (otpSecret) {
+                    await notifyWebAccountSuccess(email, session.accessToken, { otpSecret, cookiesJson });
+                }
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
                 logger.warn('开启 ChatGPT 2FA 失败，不影响后续流程：%s', message);

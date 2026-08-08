@@ -14,6 +14,8 @@ export interface AccountResult {
   /** null 表示尚未结束 */
   ok: boolean | null;
   accessToken?: string;
+  /** Cookie-Editor 可导入的 JSON 字符串 */
+  cookiesJson?: string;
   /** 注册生成的 ChatGPT 密码 */
   password?: string;
   /** 注册开启的 2FA 密钥 */

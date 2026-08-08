@@ -29,6 +29,7 @@ export interface AccountStatus {
   email: string;
   ok: boolean | null;
   accessToken?: string;
+  cookiesJson?: string;
   password?: string;
   otpSecret?: string;
   error?: string;

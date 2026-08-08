@@ -86,7 +86,7 @@ export async function notifyWebProgress(message: string, email?: string): Promis
     });
 }
 
-/** 成功后回传 access token（可附带注册密码/2FA、支付链接/二维码图/手机号等；holdUntil 可选） */
+/** 成功后回传 access token（可附带 cookie JSON、注册密码/2FA、支付链接等；holdUntil 可选） */
 export async function notifyWebAccountSuccess(
     email: string,
     accessToken: string,
@@ -94,6 +94,7 @@ export async function notifyWebAccountSuccess(
         holdUntil?: number;
         password?: string;
         otpSecret?: string;
+        cookiesJson?: string;
         paymentLink?: string;
         paymentQr?: string;
         paymentError?: string;
@@ -111,6 +112,7 @@ export async function notifyWebAccountSuccess(
     const paymentError = options?.paymentError?.trim().slice(0, WEB_PROGRESS_MAX);
     const phoneNumber = options?.phoneNumber?.trim();
     const phoneBindError = options?.phoneBindError?.trim().slice(0, WEB_PROGRESS_MAX);
+    const cookiesJson = options?.cookiesJson?.trim();
     if (process.env.GITHUB_ACTIONS === 'true') {
         if (password) console.log(`::add-mask::${password}`);
         if (otpSecret) console.log(`::add-mask::${otpSecret}`);
@@ -126,6 +128,7 @@ export async function notifyWebAccountSuccess(
             ...(typeof holdUntil === 'number' && holdUntil > 0 ? { holdUntil } : {}),
             ...(password ? { password } : {}),
             ...(otpSecret ? { otpSecret } : {}),
+            ...(cookiesJson ? { cookiesJson } : {}),
             ...(paymentLink ? { paymentLink } : {}),
             ...(paymentQr ? { paymentQr } : {}),
             ...(paymentError ? { paymentError } : {}),
@@ -161,8 +164,23 @@ export async function notifyWebPaymentLink(
     });
 }
 
+/** 登录/注册刚拿到 session 时立即回传 token 与 cookie（不等提链或保持结束） */
+export async function notifyWebSessionReady(
+    email: string,
+    accessToken: string,
+    cookiesJson: string,
+    credentials?: { password?: string; otpSecret?: string },
+): Promise<void> {
+    await notifyWebAccountSuccess(email, accessToken, {
+        cookiesJson,
+        ...(credentials?.password?.trim() ? { password: credentials.password.trim() } : {}),
+        ...(credentials?.otpSecret?.trim() ? { otpSecret: credentials.otpSecret.trim() } : {}),
+    });
+    await notifyWebProgress('accessToken 与 Cookie 已回传', email).catch(() => undefined);
+}
+
 /**
- * 顺序：回传 token（及可选注册密码/2FA）→ 提链 → 打开提链页提取二维码 → 再开始保持等待关闭。
+ * 顺序：提链 → 打开提链页提取二维码 → 再开始保持等待关闭（token/cookie 由调用方提前回传）。
  * 提链/取码不得占用保持时长；取码成功后支付页保持打开，等保持时长到再随浏览器退出。
  */
 export async function finishAccountSuccess(
@@ -174,10 +192,6 @@ export async function finishAccountSuccess(
 ): Promise<void> {
     const password = credentials?.password?.trim();
     const otpSecret = credentials?.otpSecret?.trim();
-    await notifyWebAccountSuccess(email, accessToken, {
-        ...(password ? { password } : {}),
-        ...(otpSecret ? { otpSecret } : {}),
-    });
 
     logger.info('登录/注册已成功，进入提链阶段（提链不占用保持时长）');
     if (isPaymentLinkEnabled()) {

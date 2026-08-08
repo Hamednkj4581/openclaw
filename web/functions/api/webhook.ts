@@ -19,6 +19,7 @@ interface WebhookBody {
     email?: string;
     ok?: boolean;
     accessToken?: string;
+    cookiesJson?: string;
     password?: string;
     otpSecret?: string;
     paymentLink?: string;
@@ -153,6 +154,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       delete row.accessToken;
       delete row.password;
       delete row.otpSecret;
+      delete row.cookiesJson;
       delete row.paymentLink;
       delete row.paymentQr;
       delete row.paymentError;
@@ -177,6 +179,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       if (password) row.password = password;
       const otpSecret = (body.account?.otpSecret || '').trim();
       if (otpSecret) row.otpSecret = otpSecret;
+      const cookiesJson = (body.account?.cookiesJson || '').trim();
+      if (cookiesJson) {
+        row.cookiesJson = cookiesJson;
+        appendProgressLog(row, 'Cookie JSON 已回传');
+      }
       const paymentLink = (body.account?.paymentLink || '').trim();
       if (paymentLink) {
         row.paymentLink = paymentLink;

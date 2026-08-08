@@ -73,9 +73,14 @@ export function cookieFileNameForEmail(email: string): string {
     return `${safe}.json`;
 }
 
-export function writeCookieEditorJson(filePath: string, cookies: BrowserCookie[]): number {
+export function buildCookieEditorJson(cookies: BrowserCookie[]): string {
     const filtered = filterChatGptCookies(cookies);
     const payload = toCookieEditorFormat(filtered.length ? filtered : cookies);
+    return JSON.stringify(payload, null, 2);
+}
+
+export function writeCookieEditorJson(filePath: string, cookies: BrowserCookie[]): number {
+    const payload = JSON.parse(buildCookieEditorJson(cookies)) as CookieEditorItem[];
     fs.writeFileSync(filePath, JSON.stringify(payload, null, 2) + '\n');
     return payload.length;
 }

@@ -429,6 +429,9 @@ export default function App() {
                     </Text>
                   </div>
                   {account.hint ? <Paragraph className="account-hint">{account.hint}</Paragraph> : null}
+                  {account.paymentError ? (
+                    <Paragraph className="account-payment-error">{account.paymentError}</Paragraph>
+                  ) : null}
                   {account.accessToken ? (
                     <Space.Compact className="token-box">
                       <Input value={account.accessToken} readOnly />

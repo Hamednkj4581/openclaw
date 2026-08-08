@@ -43,11 +43,14 @@ async function postWebCallback(payload: Record<string, unknown>): Promise<void> 
     }
 }
 
-/** 向网页回传友好进度（不含技术细节；失败不影响主流程） */
+/** 进度文案上限（需容纳提链失败原因） */
+const WEB_PROGRESS_MAX = 160;
+
+/** 向网页回传进度（失败不影响主流程） */
 export async function notifyWebProgress(message: string, email?: string): Promise<void> {
     const config = webCallbackConfig();
     if (!config) return;
-    const text = message.trim().slice(0, 80);
+    const text = message.trim().slice(0, WEB_PROGRESS_MAX);
     if (!text) return;
     await postWebCallback({
         event: 'progress',
@@ -59,11 +62,17 @@ export async function notifyWebProgress(message: string, email?: string): Promis
     });
 }
 
-/** 成功后回传 access token（可附带支付链接/二维码；holdUntil 可选，提链完成后再传） */
+/** 成功后回传 access token（可附带支付链接/二维码/提链失败原因；holdUntil 可选） */
 export async function notifyWebAccountSuccess(
     email: string,
     accessToken: string,
-    options?: { holdUntil?: number; paymentLink?: string; paymentQr?: string; paymentQrUrl?: string }
+    options?: {
+        holdUntil?: number;
+        paymentLink?: string;
+        paymentQr?: string;
+        paymentQrUrl?: string;
+        paymentError?: string;
+    }
 ): Promise<void> {
     const config = webCallbackConfig();
     if (!config) return;
@@ -71,6 +80,7 @@ export async function notifyWebAccountSuccess(
     const paymentLink = options?.paymentLink?.trim();
     const paymentQr = options?.paymentQr?.trim();
     const paymentQrUrl = options?.paymentQrUrl?.trim();
+    const paymentError = options?.paymentError?.trim().slice(0, WEB_PROGRESS_MAX);
     await postWebCallback({
         event: 'account_done',
         account: {
@@ -82,6 +92,7 @@ export async function notifyWebAccountSuccess(
             ...(paymentLink ? { paymentLink } : {}),
             ...(paymentQr ? { paymentQr } : {}),
             ...(paymentQrUrl ? { paymentQrUrl } : {}),
+            ...(paymentError ? { paymentError } : {}),
         },
     });
 }
@@ -126,7 +137,9 @@ export async function finishAccountSuccess(
     await notifyWebAccountSuccess(email, accessToken);
 
     logger.info('登录/注册已成功，进入提链阶段（提链不占用保持时长）');
-    const paymentLink = await extractAccountPaymentLink(accessToken, (message) => notifyWebProgress(message, email));
+    const payment = await extractAccountPaymentLink(accessToken, (message) => notifyWebProgress(message, email));
+    const paymentLink = payment.link;
+    let paymentError = payment.error;
     let paymentQr: string | undefined;
     let paymentQrUrl: string | undefined;
     if (paymentLink) {
@@ -137,18 +150,22 @@ export async function finishAccountSuccess(
             paymentQr = captured?.dataUrl;
             paymentQrUrl = captured?.qrUrl;
             if (!paymentQr) {
-                logger.warn('支付链接已就绪，但二维码提取失败');
-                await notifyWebProgress('支付链接已就绪，二维码获取失败', email).catch(() => undefined);
+                paymentError = '支付链接已就绪，但二维码获取失败';
+                logger.warn(paymentError);
+                await notifyWebProgress(paymentError, email).catch(() => undefined);
             }
         } else {
-            logger.warn('提链成功但无浏览器实例，跳过二维码提取');
+            paymentError = '提链成功但无浏览器实例，跳过二维码提取';
+            logger.warn(paymentError);
         }
         await notifyWebPaymentLink(email, paymentLink, paymentQr, paymentQrUrl);
+    } else if (paymentError) {
+        logger.info('提链未完成：%s', paymentError);
     } else {
-        logger.info('提链阶段未得到支付链接，跳过二维码提取');
+        logger.info('提链阶段未启用或未得到支付链接，跳过二维码提取');
     }
 
-    // 提链完成后再开始「等待关闭」
+    // 提链完成后再开始「等待关闭」；paymentError 单独落库，不被保持提示覆盖
     const holdMinutes = resolveHoldMinutes();
     const holdUntil = Date.now() + holdMinutes * 60 * 1000;
     logger.info('提链阶段结束，即将开始保持等待 %s 分钟', holdMinutes);
@@ -157,6 +174,7 @@ export async function finishAccountSuccess(
         ...(paymentLink ? { paymentLink } : {}),
         ...(paymentQr ? { paymentQr } : {}),
         ...(paymentQrUrl ? { paymentQrUrl } : {}),
+        ...(paymentError ? { paymentError } : {}),
     });
     await notifyWebProgress(`将保持约 ${holdMinutes} 分钟后关闭…`, email);
     await waitHoldMinutes(holdMinutes, holdUntil);

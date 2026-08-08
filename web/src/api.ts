@@ -20,6 +20,7 @@ export interface AccountStatus {
   accessToken?: string;
   error?: string;
   hint?: string;
+  paymentError?: string;
   paymentLink?: string;
   paymentQr?: string;
   paymentQrUrl?: string;

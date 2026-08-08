@@ -173,23 +173,37 @@ export function isPaymentLinkEnabled(): boolean {
     return (process.env.PAYMENT_LINK_TYPE || '').trim() === 'gcash';
 }
 
+/** 单账号提链结果：成功带 link；失败/跳过带 error（给客户端展示） */
+export type PaymentLinkResult = {
+    link?: string;
+    error?: string;
+};
+
+function formatEligibilitySkip(eligibility: EligibilityResult): string {
+    const parts = [`state=${eligibility.state || '?'}`];
+    if (eligibility.error) parts.push(eligibility.error);
+    else parts.push(`eligible=${eligibility.eligible}`);
+    return `暂无支付资格（${parts.join('，')}）`;
+}
+
 /**
- * 当前账号单独提链；成功返回 URL。失败只告警，不抛出（不影响注册/登录成功）。
+ * 当前账号单独提链；失败只告警，不抛出（不影响注册/登录成功）。
  */
 export async function extractAccountPaymentLink(
     accessToken: string,
     onProgress: ProgressFn = async () => undefined
-): Promise<string | undefined> {
+): Promise<PaymentLinkResult> {
     const linkType = (process.env.PAYMENT_LINK_TYPE || '').trim();
     if (!isPaymentLinkEnabled()) {
         logger.info('未启用 GCash 提链（PAYMENT_LINK_TYPE=%s），跳过', linkType || '空');
-        return undefined;
+        return {};
     }
     const card = (process.env.PAYMENT_CARD || '').trim();
     if (!card) {
+        const tip = '未配置支付卡密，已跳过提链';
         logger.warn('已选择 gcash 但未提供卡密，跳过提链');
-        await onProgress('未配置支付卡密，已跳过提链');
-        return undefined;
+        await onProgress(tip);
+        return { error: tip };
     }
     if (process.env.GITHUB_ACTIONS === 'true') {
         console.log(`::add-mask::${card}`);
@@ -215,9 +229,10 @@ export async function extractAccountPaymentLink(
             eligibility.error ? ` error=${eligibility.error}` : '',
         );
         if (!eligibility.ok) {
-            logger.warn('当前账号暂无支付资格，已跳过提链');
-            await onProgress('当前账号暂无支付资格，已跳过提链');
-            return undefined;
+            const tip = formatEligibilitySkip(eligibility);
+            logger.warn('当前账号暂无支付资格，已跳过提链：%s', tip);
+            await onProgress(tip);
+            return { error: tip };
         }
 
         await onProgress('正在创建支付链接…');
@@ -237,12 +252,13 @@ export async function extractAccountPaymentLink(
             host = '(无法解析)';
         }
         logger.info('单账号提链成功：host=%s length=%s', host, link.length);
-        return link;
+        return { link };
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        const tip = `支付链接生成失败：${message}`;
         logger.warn('单账号提链失败（不影响主流程）：%s', message);
-        await onProgress('支付链接生成失败，可稍后重试').catch(() => undefined);
-        return undefined;
+        await onProgress(tip).catch(() => undefined);
+        return { error: tip };
     }
 }
 

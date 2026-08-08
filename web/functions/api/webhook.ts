@@ -15,6 +15,7 @@ interface WebhookBody {
     paymentLink?: string;
     paymentQr?: string;
     paymentQrUrl?: string;
+    paymentError?: string;
     error?: string;
     holdUntil?: number;
   };
@@ -66,7 +67,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       }));
     }
   } else if (body.event === 'progress') {
-    const tip = (body.message || '').trim().slice(0, 80);
+    const tip = (body.message || '').trim().slice(0, 160);
     if (!tip) return friendlyError(400, '进度文案无效');
     state.phase = 'processing';
     const index = Number(body.account?.index);
@@ -95,9 +96,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       delete row.paymentLink;
       delete row.paymentQr;
       delete row.paymentQrUrl;
+      delete row.paymentError;
       delete row.holdUntil;
       delete row.hint;
-      row.error = (body.account?.error || '处理失败').slice(0, 80);
+      row.error = (body.account?.error || '处理失败').slice(0, 160);
     } else {
       delete row.error;
       if (body.account?.accessToken) {
@@ -115,6 +117,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       const paymentQrUrl = (body.account?.paymentQrUrl || '').trim();
       if (paymentQrUrl) {
         row.paymentQrUrl = paymentQrUrl;
+      }
+      const paymentErrorRaw = body.account?.paymentError;
+      if (typeof paymentErrorRaw === 'string') {
+        const paymentError = paymentErrorRaw.trim().slice(0, 160);
+        if (paymentError) row.paymentError = paymentError;
+        else delete row.paymentError;
+      } else if (paymentLink && (paymentQr || row.paymentQr)) {
+        delete row.paymentError;
       }
       const holdUntil = Number(body.account?.holdUntil);
       if (Number.isFinite(holdUntil) && holdUntil > 0) {

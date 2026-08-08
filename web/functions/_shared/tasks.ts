@@ -29,6 +29,7 @@ export function publicStatus(state: TaskState) {
       accessToken: a.accessToken || undefined,
       error: a.error || undefined,
       hint: a.hint || undefined,
+      paymentError: a.paymentError || undefined,
       paymentLink: a.paymentLink || undefined,
       paymentQr: a.paymentQr || undefined,
       paymentQrUrl: a.paymentQrUrl || undefined,

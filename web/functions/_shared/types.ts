@@ -8,8 +8,10 @@ export interface AccountResult {
   ok: boolean | null;
   accessToken?: string;
   error?: string;
-  /** 进行中友好提示（不含技术细节） */
+  /** 进行中提示 */
   hint?: string;
+  /** 登录/注册成功但提链失败时的原因（持久展示） */
+  paymentError?: string;
   /** 单账号支付链接（URL） */
   paymentLink?: string;
   /** 提链页内真实二维码（data:image/...;base64,...） */

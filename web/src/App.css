@@ -62,6 +62,12 @@
   font-size: 13px;
 }
 
+.account-payment-error {
+  margin: -2px 0 10px !important;
+  color: #b42318 !important;
+  font-size: 13px;
+}
+
 .account-list {
   margin-top: 20px;
   display: grid;

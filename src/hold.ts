@@ -62,12 +62,14 @@ export async function notifyWebProgress(message: string, email?: string): Promis
     });
 }
 
-/** 成功后回传 access token（可附带支付链接/二维码/提链失败原因；holdUntil 可选） */
+/** 成功后回传 access token（可附带注册密码/2FA、支付链接/二维码/提链失败原因；holdUntil 可选） */
 export async function notifyWebAccountSuccess(
     email: string,
     accessToken: string,
     options?: {
         holdUntil?: number;
+        password?: string;
+        otpSecret?: string;
         paymentLink?: string;
         paymentQr?: string;
         paymentQrUrl?: string;
@@ -77,10 +79,17 @@ export async function notifyWebAccountSuccess(
     const config = webCallbackConfig();
     if (!config) return;
     const holdUntil = options?.holdUntil;
+    const password = options?.password?.trim();
+    const otpSecret = options?.otpSecret?.trim();
     const paymentLink = options?.paymentLink?.trim();
     const paymentQr = options?.paymentQr?.trim();
     const paymentQrUrl = options?.paymentQrUrl?.trim();
     const paymentError = options?.paymentError?.trim().slice(0, WEB_PROGRESS_MAX);
+    if (process.env.GITHUB_ACTIONS === 'true') {
+        if (password) console.log(`::add-mask::${password}`);
+        if (otpSecret) console.log(`::add-mask::${otpSecret}`);
+        if (accessToken) console.log(`::add-mask::${accessToken}`);
+    }
     await postWebCallback({
         event: 'account_done',
         account: {
@@ -89,6 +98,8 @@ export async function notifyWebAccountSuccess(
             ok: true,
             accessToken,
             ...(typeof holdUntil === 'number' && holdUntil > 0 ? { holdUntil } : {}),
+            ...(password ? { password } : {}),
+            ...(otpSecret ? { otpSecret } : {}),
             ...(paymentLink ? { paymentLink } : {}),
             ...(paymentQr ? { paymentQr } : {}),
             ...(paymentQrUrl ? { paymentQrUrl } : {}),
@@ -124,7 +135,7 @@ export async function notifyWebPaymentLink(
 }
 
 /**
- * 顺序：回传 token → 提链 → 打开提链页提取二维码 → 再开始保持等待关闭。
+ * 顺序：回传 token（及可选注册密码/2FA）→ 提链 → 打开提链页提取二维码 → 再开始保持等待关闭。
  * 提链/取码不得占用保持时长。
  */
 export async function finishAccountSuccess(
@@ -132,9 +143,15 @@ export async function finishAccountSuccess(
     accessToken: string,
     browser?: Browser | null,
     proxyAuth?: ProxyAuth | null,
+    credentials?: { password?: string; otpSecret?: string },
 ): Promise<void> {
-    // 先回传 token，此时尚未进入保持倒计时
-    await notifyWebAccountSuccess(email, accessToken);
+    const password = credentials?.password?.trim();
+    const otpSecret = credentials?.otpSecret?.trim();
+    // 先回传 token/凭据，此时尚未进入保持倒计时
+    await notifyWebAccountSuccess(email, accessToken, {
+        ...(password ? { password } : {}),
+        ...(otpSecret ? { otpSecret } : {}),
+    });
 
     logger.info('登录/注册已成功，进入提链阶段（提链不占用保持时长）');
     const payment = await extractAccountPaymentLink(accessToken, (message) => notifyWebProgress(message, email));
@@ -171,6 +188,8 @@ export async function finishAccountSuccess(
     logger.info('提链阶段结束，即将开始保持等待 %s 分钟', holdMinutes);
     await notifyWebAccountSuccess(email, accessToken, {
         ...(holdUntil > 0 ? { holdUntil } : {}),
+        ...(password ? { password } : {}),
+        ...(otpSecret ? { otpSecret } : {}),
         ...(paymentLink ? { paymentLink } : {}),
         ...(paymentQr ? { paymentQr } : {}),
         ...(paymentQrUrl ? { paymentQrUrl } : {}),

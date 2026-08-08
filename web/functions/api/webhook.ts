@@ -12,6 +12,8 @@ interface WebhookBody {
     email?: string;
     ok?: boolean;
     accessToken?: string;
+    password?: string;
+    otpSecret?: string;
     paymentLink?: string;
     paymentQr?: string;
     paymentQrUrl?: string;
@@ -105,6 +107,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
     if (!ok) {
       delete row.accessToken;
+      delete row.password;
+      delete row.otpSecret;
       delete row.paymentLink;
       delete row.paymentQr;
       delete row.paymentQrUrl;
@@ -119,6 +123,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         row.accessToken = body.account.accessToken;
         if (prevOk !== true) appendProgressLog(row, '账号处理成功，已回传结果');
       }
+      const password = (body.account?.password || '').trim();
+      if (password) row.password = password;
+      const otpSecret = (body.account?.otpSecret || '').trim();
+      if (otpSecret) row.otpSecret = otpSecret;
       const paymentLink = (body.account?.paymentLink || '').trim();
       if (paymentLink) {
         row.paymentLink = paymentLink;

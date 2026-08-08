@@ -14,6 +14,10 @@ export interface AccountResult {
   /** null 表示尚未结束 */
   ok: boolean | null;
   accessToken?: string;
+  /** 注册生成的 ChatGPT 密码 */
+  password?: string;
+  /** 注册开启的 2FA 密钥 */
+  otpSecret?: string;
   error?: string;
   /** 进行中提示 */
   hint?: string;

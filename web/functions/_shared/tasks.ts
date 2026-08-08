@@ -28,6 +28,8 @@ export function publicStatus(state: TaskState) {
       email: a.email,
       ok: a.ok,
       accessToken: a.accessToken || undefined,
+      password: a.password || undefined,
+      otpSecret: a.otpSecret || undefined,
       error: a.error || undefined,
       hint: a.hint || undefined,
       paymentError: a.paymentError || undefined,

@@ -811,7 +811,10 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
         );
         logger.info('ChatGPT 注册完成%s，已提取 accessToken 并导出 session/cookie', otpSecret ? '，已开启 2FA' : '');
 
-        await finishAccountSuccess(email, session.accessToken, chrome, proxy);
+        await finishAccountSuccess(email, session.accessToken, chrome, proxy, {
+            password: chatGptPassword,
+            ...(otpSecret ? { otpSecret } : {}),
+        });
     } catch (error) {
         await fail(error);
     } finally {

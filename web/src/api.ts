@@ -23,6 +23,8 @@ export interface AccountStatus {
   email: string;
   ok: boolean | null;
   accessToken?: string;
+  password?: string;
+  otpSecret?: string;
   error?: string;
   hint?: string;
   paymentError?: string;

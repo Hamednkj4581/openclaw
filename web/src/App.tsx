@@ -256,6 +256,20 @@ export default function App() {
       .filter(Boolean);
   }, [status]);
 
+  const allCredentialLines = useMemo(() => {
+    const rows = status?.accounts || [];
+    return rows
+      .map((account) => {
+        const email = (account.email || '').trim();
+        const password = (account.password || '').trim();
+        if (!email || !password) return '';
+        const otp = (account.otpSecret || '').trim();
+        const token = (account.accessToken || '').trim();
+        return [email, password, ...(otp ? [otp] : []), ...(token ? [token] : [])].join('----');
+      })
+      .filter(Boolean);
+  }, [status]);
+
   const onSubmit = async (values: TaskFormValues) => {
     setSubmitting(true);
     try {
@@ -310,6 +324,28 @@ export default function App() {
       return;
     }
     await copyText(allPaymentQrUrls.join('\n'), `已复制 ${allPaymentQrUrls.length} 条二维码链接`);
+  };
+
+  const copyAllCredentialLines = async () => {
+    if (!allCredentialLines.length) {
+      message.warning('暂无账号密码可复制');
+      return;
+    }
+    await copyText(allCredentialLines.join('\n'), `已复制 ${allCredentialLines.length} 条账号结果`);
+  };
+
+  const formatAccountLine = (account: {
+    email: string;
+    password?: string;
+    otpSecret?: string;
+    accessToken?: string;
+  }) => {
+    const email = (account.email || '').trim();
+    const password = (account.password || '').trim();
+    if (!email || !password) return '';
+    const otp = (account.otpSecret || '').trim();
+    const token = (account.accessToken || '').trim();
+    return [email, password, ...(otp ? [otp] : []), ...(token ? [token] : [])].join('----');
   };
 
   return (
@@ -471,13 +507,22 @@ export default function App() {
             strokeColor={{ from: '#0f766e', to: '#14b8a6' }}
           />
           <ProgressLogDetails logs={status?.logs} title="任务详情" />
-          {allPaymentQrUrls.length ? (
+          {(allCredentialLines.length > 0 || allPaymentQrUrls.length > 0) && (
             <div className="bulk-copy-row">
-              <Button icon={<CopyOutlined />} onClick={() => void copyAllPaymentQrUrls()}>
-                复制全部二维码链接（{allPaymentQrUrls.length}）
-              </Button>
+              <Space wrap>
+                {allCredentialLines.length ? (
+                  <Button icon={<CopyOutlined />} onClick={() => void copyAllCredentialLines()}>
+                    复制全部账号结果（{allCredentialLines.length}）
+                  </Button>
+                ) : null}
+                {allPaymentQrUrls.length ? (
+                  <Button icon={<CopyOutlined />} onClick={() => void copyAllPaymentQrUrls()}>
+                    复制全部二维码链接（{allPaymentQrUrls.length}）
+                  </Button>
+                ) : null}
+              </Space>
             </div>
-          ) : null}
+          )}
 
           {status?.accounts?.length ? (
             <div className="account-list">
@@ -494,13 +539,52 @@ export default function App() {
                     <Paragraph className="account-payment-error">{account.paymentError}</Paragraph>
                   ) : null}
                   <ProgressLogDetails logs={account.logs} />
+                  {account.password ? (
+                    <div className="cred-box">
+                      <Text strong>密码</Text>
+                      <Space.Compact className="token-box">
+                        <Input value={account.password} readOnly />
+                        <Button icon={<CopyOutlined />} onClick={() => void copyText(account.password!, '已复制密码')}>
+                          复制
+                        </Button>
+                      </Space.Compact>
+                    </div>
+                  ) : null}
+                  {account.otpSecret ? (
+                    <div className="cred-box">
+                      <Text strong>2FA</Text>
+                      <Space.Compact className="token-box">
+                        <Input value={account.otpSecret} readOnly />
+                        <Button icon={<CopyOutlined />} onClick={() => void copyText(account.otpSecret!, '已复制 2FA')}>
+                          复制
+                        </Button>
+                      </Space.Compact>
+                    </div>
+                  ) : null}
                   {account.accessToken ? (
-                    <Space.Compact className="token-box">
-                      <Input value={account.accessToken} readOnly />
-                      <Button icon={<CopyOutlined />} onClick={() => void copyText(account.accessToken!)}>
-                        复制
-                      </Button>
-                    </Space.Compact>
+                    <div className="cred-box">
+                      <Text strong>accessToken</Text>
+                      <Space.Compact className="token-box">
+                        <Input value={account.accessToken} readOnly />
+                        <Button icon={<CopyOutlined />} onClick={() => void copyText(account.accessToken!)}>
+                          复制
+                        </Button>
+                      </Space.Compact>
+                    </div>
+                  ) : null}
+                  {account.password ? (
+                    <Button
+                      size="small"
+                      icon={<CopyOutlined />}
+                      style={{ marginBottom: 10 }}
+                      onClick={() => {
+                        const line = formatAccountLine(account);
+                        if (!line) return;
+                        void copyText(line, '已复制账号结果行');
+                      }}
+                    >
+                      复制本账号结果行
+                    </Button>
                   ) : null}
                   {account.paymentLink ? (
                     <div className="payment-box">

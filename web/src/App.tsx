@@ -248,6 +248,13 @@ export default function App() {
   const waiting = Boolean(taskId && (!status || !status.done));
   const waitingTip = useWaitingTip(waiting);
 
+  const allPaymentQrUrls = useMemo(() => {
+    const rows = status?.accounts || [];
+    return rows
+      .map((account) => (account.paymentQrUrl || '').trim())
+      .filter(Boolean);
+  }, [status]);
+
   const onSubmit = async (values: TaskFormValues) => {
     setSubmitting(true);
     try {
@@ -292,6 +299,14 @@ export default function App() {
   const copyText = async (text: string, okMessage = '已复制') => {
     await navigator.clipboard.writeText(text);
     message.success(okMessage);
+  };
+
+  const copyAllPaymentQrUrls = async () => {
+    if (!allPaymentQrUrls.length) {
+      message.warning('暂无二维码链接可复制');
+      return;
+    }
+    await copyText(allPaymentQrUrls.join('\n'), `已复制 ${allPaymentQrUrls.length} 条二维码链接`);
   };
 
   return (
@@ -453,6 +468,13 @@ export default function App() {
             strokeColor={{ from: '#0f766e', to: '#14b8a6' }}
           />
           <ProgressLogDetails logs={status?.logs} title="任务详情" />
+          {allPaymentQrUrls.length ? (
+            <div className="bulk-copy-row">
+              <Button icon={<CopyOutlined />} onClick={() => void copyAllPaymentQrUrls()}>
+                复制全部二维码链接（{allPaymentQrUrls.length}）
+              </Button>
+            </div>
+          ) : null}
 
           {status?.accounts?.length ? (
             <div className="account-list">
@@ -507,6 +529,8 @@ export default function App() {
                             </Button>
                           </Space.Compact>
                         </>
+                      ) : account.paymentQr ? (
+                        <Text type="secondary">二维码图片已就绪，但未解析到链接</Text>
                       ) : null}
                     </div>
                   ) : null}

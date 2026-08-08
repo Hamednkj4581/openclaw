@@ -24,14 +24,14 @@ const CHATGPT_API_PROBE_URL = 'https://api.chatgpt.com/v1';
 export const STATIC_ASSET_PATTERN = String.raw`\.(png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf|otf|eot|css|js|map)(\?|$)`;
 export const STATIC_ASSET_URL_RE = new RegExp(STATIC_ASSET_PATTERN, 'i');
 
-/** workflow 输入 enable_711_proxy / 环境变量 ENABLE_711_PROXY，默认关闭 */
-export function is711ProxyEnabled(): boolean {
-    return ['1', 'true'].includes((process.env.ENABLE_711_PROXY ?? 'false').toLowerCase());
+/** workflow 输入 enable_proxy / 环境变量 ENABLE_PROXY，默认关闭 */
+export function isProxyEnabled(): boolean {
+    return ['1', 'true'].includes((process.env.ENABLE_PROXY ?? 'false').toLowerCase());
 }
 
 /** 与 buildProxyPacUrl 规则一致，供 network 产物标注当前会走 DIRECT 还是 PROXY；代理关闭时一律 DIRECT */
 export function pacRouteForUrl(url: string): 'DIRECT' | 'PROXY' {
-    if (!is711ProxyEnabled()) return 'DIRECT';
+    if (!isProxyEnabled()) return 'DIRECT';
     return STATIC_ASSET_URL_RE.test(url) ? 'DIRECT' : 'PROXY';
 }
 
@@ -136,8 +136,8 @@ export function parseProxyLink(raw: string, linkIndex = 0): ProxyConfig {
     };
 }
 
-/** 从 PROXY_LINKS / PROXY_URL 按账号序号分配静态代理链接 */
-export function buildStickyProxyFromEnv(accountIndex = Number(process.env.WEB_ACCOUNT_INDEX || '0')): ProxyConfig {
+/** 从 PROXY_LINKS / PROXY_URL 按账号序号分配代理链接 */
+export function buildProxyFromEnv(accountIndex = Number(process.env.WEB_ACCOUNT_INDEX || '0')): ProxyConfig {
     const list = parseProxyLinkList(process.env.PROXY_LINKS || '');
     const single = (process.env.PROXY_URL || '').trim();
     const links = list.length ? list : (single ? [single] : []);

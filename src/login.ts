@@ -10,7 +10,7 @@ import logger from './logger.js';
 import githubAnnotation from './annotations.js';
 import { installTurnstileHook, solveCloudflareIfPresent, validateCapSolver } from './capsolver.js';
 import { installNetworkCapture } from './networkCapture.js';
-import { buildStickyProxyFromEnv, buildProxyPacUrl, is711ProxyEnabled, preflightProxy } from './proxy.js';
+import { buildProxyFromEnv, buildProxyPacUrl, isProxyEnabled, preflightProxy } from './proxy.js';
 import {
     AUTHENTICATED_SELECTORS,
     CONTINUE_SELECTORS,
@@ -406,13 +406,12 @@ function writeAccountCookies(email: string, cookies: Awaited<ReturnType<Page['co
         await validateCapSolver();
         await notifyWebProgress('准备完成，正在打开服务…', account.email);
 
-        const enable711Proxy = is711ProxyEnabled();
-        const proxy = enable711Proxy ? buildStickyProxyFromEnv() : null;
+        const proxy = isProxyEnabled() ? buildProxyFromEnv() : null;
         if (proxy) {
             if (proxy.password) sensitiveValues.add(proxy.password);
             if (proxy.username) sensitiveValues.add(proxy.username);
         } else {
-            logger.info('代理已关闭（ENABLE_711_PROXY），浏览器直连');
+            logger.info('代理已关闭（ENABLE_PROXY），浏览器直连');
         }
 
         let page!: Page;

@@ -12,7 +12,7 @@ import githubAnnotation from './annotations.js';
 import { credentialsFromEnv, preflightMail, waitForMailVerification } from './mailProvider.js';
 import { installTurnstileHook, solveCloudflareIfPresent, validateCapSolver } from './capsolver.js';
 import { installNetworkCapture } from './networkCapture.js';
-import { buildStickyProxyFromEnv, buildProxyPacUrl, is711ProxyEnabled, preflightProxy } from './proxy.js';
+import { buildProxyFromEnv, buildProxyPacUrl, isProxyEnabled, preflightProxy } from './proxy.js';
 import { AUTHENTICATED_SELECTORS, CONTINUE_SELECTORS, LOGIN_SELECTORS, MFA_CHALLENGE_SELECTORS, MFA_CODE_SELECTORS, MFA_ENABLED_SELECTORS, MFA_VERIFY_SELECTORS, SIGNUP_EMAIL_SELECTORS, SIGNUP_SELECTORS } from './selectors.js';
 import { extractSessionExport, writeSessionJson } from './sessionExport.js';
 import { buildCookieEditorJson, cookieFileNameForEmail, writeCookieEditorJson } from './cookieExport.js';
@@ -21,7 +21,7 @@ import { finishAccountSuccess, notifyWebAccountFailure, notifyWebAccountSuccess,
 const MAX_TIMEOUT = Math.pow(2, 31) - 1;
 const EVIDENCE_TIMEOUT_MS = 15_000;
 const VERIFICATION_EMAIL_TIMEOUT_MS = 30_000;
-/** 浏览器打开 chatgpt.com 仍隧道失败时，换 sticky session 重开的次数 */
+/** 浏览器打开 chatgpt.com 仍隧道失败时，关闭后重开的次数 */
 const MAX_OPEN_CHATGPT_ATTEMPTS = 3;
 /** 打开注册入口失败时，关闭 page 再开首页的最大重试次数（不含首次） */
 const MAX_SIGNUP_PAGE_RETRIES = 3;
@@ -546,13 +546,12 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
         await validateCapSolver();
         await preflightMail(credentials);
         await notifyWebProgress('准备完成，正在打开服务…', email);
-        const enable711Proxy = is711ProxyEnabled();
-        const proxy = enable711Proxy ? buildStickyProxyFromEnv() : null;
+        const proxy = isProxyEnabled() ? buildProxyFromEnv() : null;
         if (proxy) {
             if (proxy.password) sensitiveValues.add(proxy.password);
             if (proxy.username) sensitiveValues.add(proxy.username);
         } else {
-            logger.info('代理已关闭（ENABLE_711_PROXY），浏览器直连');
+            logger.info('代理已关闭（ENABLE_PROXY），浏览器直连');
         }
         const registrationStartedAt = new Date(Date.now() - 30_000);
         const enableChatGptMfa = ['1', 'true'].includes((process.env.ENABLE_CHATGPT_MFA ?? 'true').toLowerCase());

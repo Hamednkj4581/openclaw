@@ -408,7 +408,7 @@ export default function App() {
       const proxyEnabled = isProxyEnabled(values.proxy_region);
       const shared = {
         accounts: values.accounts,
-        enable_711_proxy: proxyEnabled,
+        enable_proxy: proxyEnabled,
         proxy_region: proxyEnabled ? values.proxy_region : '',
         proxy_links: proxyEnabled ? (values.proxy_links || '').trim() : '',
         hold_minutes: [0, 5, 10, 15, 30].includes(Number(values.hold_minutes))
@@ -730,7 +730,7 @@ export default function App() {
             >
               <TextArea
                 rows={4}
-                placeholder={'user:pass@global.rotgb.711proxy.com:10000\nhttp://user:pass@host:10000'}
+                placeholder={'user:pass@host:10000\nhttp://user:pass@host:10000'}
                 autoComplete="off"
                 onBlur={() => {
                   const values = form.getFieldsValue();

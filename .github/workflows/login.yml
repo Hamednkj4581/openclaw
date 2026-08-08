@@ -16,7 +16,7 @@ on:
         required: false
         default: 'TimmothyBegan9059@hotmail.com'
         type: string
-      enable_711_proxy:
+      enable_proxy:
         description: '启用住宅代理（关闭则直连）'
         required: false
         default: false
@@ -79,7 +79,7 @@ jobs:
       commit_message: ${{ inputs.commit_message }}
       accounts: ${{ inputs.accounts }}
       forwarding_emails: ${{ inputs.forwarding_emails }}
-      enable_711_proxy: ${{ inputs.enable_711_proxy }}
+      enable_proxy: ${{ inputs.enable_proxy }}
       proxy_region: ${{ inputs.proxy_region }}
       proxy_links: ${{ inputs.proxy_links }}
       hold_minutes: ${{ inputs.hold_minutes }}

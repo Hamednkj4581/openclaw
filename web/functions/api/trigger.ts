@@ -19,7 +19,7 @@ interface TriggerBody {
   accounts?: string;
   forwarding_emails?: string;
   enable_mfa?: boolean;
-  enable_711_proxy?: boolean;
+  enable_proxy?: boolean;
   proxy_region?: string;
   proxy_links?: string;
   payment_link_type?: string;
@@ -129,7 +129,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   const proxyRegionRaw = (body.proxy_region || '').trim().toUpperCase();
   const enableProxy =
-    body.enable_711_proxy === true || (proxyRegionRaw !== '' && proxyRegionRaw !== 'NONE');
+    body.enable_proxy === true || (proxyRegionRaw !== '' && proxyRegionRaw !== 'NONE');
   const proxyRegion = enableProxy ? proxyRegionRaw : '';
   const proxyLinks = parseProxyLinks(body.proxy_links || '').join('\n');
   if (enableProxy) {
@@ -171,7 +171,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     commit_message: runName,
     accounts,
     web_task_id: taskId,
-    enable_711_proxy: String(enableProxy),
+    enable_proxy: String(enableProxy),
     proxy_region: proxyRegion,
     proxy_links: enableProxy ? proxyLinks : '',
     payment_link_type: paymentLinkType,

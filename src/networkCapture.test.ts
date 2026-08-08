@@ -14,7 +14,7 @@ test('sanitizeNetworkUrl ignores non-http schemes', () => {
 });
 
 test('pacRouteForUrl matches PAC static-asset direct rule', () => {
-    process.env.ENABLE_711_PROXY = 'true';
+    process.env.ENABLE_PROXY = 'true';
     assert.equal(pacRouteForUrl('https://cdn.example.com/a.js?v=1'), 'DIRECT');
     assert.equal(pacRouteForUrl('https://cdn.example.com/a.css'), 'DIRECT');
     assert.equal(pacRouteForUrl('https://chatgpt.com/'), 'PROXY');

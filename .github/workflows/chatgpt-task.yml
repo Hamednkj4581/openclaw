@@ -26,7 +26,7 @@ on:
         required: false
         default: true
         type: boolean
-      enable_711_proxy:
+      enable_proxy:
         description: '启用住宅代理（关闭则直连）'
         required: false
         default: false
@@ -260,7 +260,7 @@ jobs:
         id: run
         env:
           ENABLE_CHATGPT_MFA: ${{ inputs.enable_mfa }}
-          ENABLE_711_PROXY: ${{ inputs.enable_711_proxy }}
+          ENABLE_PROXY: ${{ inputs.enable_proxy }}
           HOLD_MINUTES: ${{ inputs.hold_minutes }}
           PAYMENT_LINK_TYPE: ${{ inputs.payment_link_type }}
           PAYMENT_CARD: ${{ inputs.payment_card }}

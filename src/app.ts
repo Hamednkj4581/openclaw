@@ -12,7 +12,7 @@ import githubAnnotation from './annotations.js';
 import { credentialsFromEnv, preflightMail, waitForMailVerification } from './mailProvider.js';
 import { installTurnstileHook, solveCloudflareIfPresent, validateCapSolver } from './capsolver.js';
 import { installNetworkCapture } from './networkCapture.js';
-import { buildJapanStickyProxy, buildProxyPacUrl, is711ProxyEnabled, preflightProxy, rotateStickySession } from './proxy.js';
+import { buildStickyProxyFromEnv, buildProxyPacUrl, is711ProxyEnabled, preflightProxy, rotateStickySession } from './proxy.js';
 import { AUTHENTICATED_SELECTORS, CONTINUE_SELECTORS, LOGIN_SELECTORS, MFA_CHALLENGE_SELECTORS, MFA_CODE_SELECTORS, MFA_ENABLED_SELECTORS, MFA_VERIFY_SELECTORS, SIGNUP_EMAIL_SELECTORS, SIGNUP_SELECTORS } from './selectors.js';
 import { cookieFileNameForEmail, writeCookieEditorJson } from './cookieExport.js';
 import { finishAccountSuccess, notifyWebProgress } from './hold.js';
@@ -256,7 +256,8 @@ async function reopenChatGptPage(
     await oldPage.close().catch(() => undefined);
     const page = await browser.newPage();
     await page.setViewport({ width: 1920, height: 1080 });
-    if (proxy) await page.authenticate({ username: proxy.username, password: proxy.password });
+    if (proxy && (proxy.username || proxy.password))
+        await page.authenticate({ username: proxy.username, password: proxy.password });
     const networkCapture = installNetworkCapture(page, redactText);
     await installTurnstileHook(page);
     await page.goto('https://chatgpt.com/', {
@@ -617,12 +618,12 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
         await preflightMail(credentials);
         await notifyWebProgress('准备完成，正在打开服务…', email);
         const enable711Proxy = is711ProxyEnabled();
-        const proxy = enable711Proxy ? buildJapanStickyProxy() : null;
+        const proxy = enable711Proxy ? buildStickyProxyFromEnv() : null;
         if (proxy) {
-            sensitiveValues.add(proxy.password);
-            sensitiveValues.add(process.env.PROXY_USERNAME ?? '');
+            if (proxy.password) sensitiveValues.add(proxy.password);
+            if (proxy.username) sensitiveValues.add(proxy.username);
         } else {
-            logger.info('711Proxy 已关闭（ENABLE_711_PROXY），浏览器直连');
+            logger.info('代理已关闭（ENABLE_711_PROXY），浏览器直连');
         }
         const registrationStartedAt = new Date(Date.now() - 30_000);
         const enableChatGptMfa = ['1', 'true'].includes((process.env.ENABLE_CHATGPT_MFA ?? 'true').toLowerCase());
@@ -631,8 +632,8 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
         for (let attempt = 1; attempt <= MAX_OPEN_CHATGPT_ATTEMPTS; attempt++) {
             if (proxy) {
                 await preflightProxy(proxy);
-                logger.info('711Proxy 预检通过：%s region=%s session=%s sessTime=%smin（仅测 api.chatgpt.com/v1；PAC：静态资源直连，其余走代理）',
-                    proxy.server, proxy.region, proxy.session, proxy.sessTime);
+                logger.info('代理预检通过：%s link=#%s session=%s（仅测 api.chatgpt.com/v1；PAC：静态资源直连，其余走代理）',
+                    proxy.server, proxy.linkIndex + 1, proxy.session);
             }
             chrome = await puppeteer.launch({
                 headless: os.platform() === 'linux',
@@ -641,7 +642,7 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
                 protocolTimeout: MAX_TIMEOUT, slowMo: 20,
                 handleSIGINT: false, handleSIGTERM: false, handleSIGHUP: false,
                 args: [
-                    // 启用代理时：PAC 静态资源直连，HTML/接口走日本代理（page.authenticate 仍作用于代理请求）
+                    // 启用代理时：PAC 静态资源直连，HTML/接口走代理（page.authenticate 仍作用于代理请求）
                     ...(proxy ? [`--proxy-pac-url=${buildProxyPacUrl(proxy)}`] : []),
                     '--lang=en-US', '--window-size=1920,1080', '--disable-blink-features=AutomationControlled',
                     '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
@@ -651,7 +652,8 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
             logger.info(chrome.process()?.spawnfile, await chrome.version());
             page = await chrome.newPage();
             await page.setViewport({ width: 1920, height: 1080 });
-            if (proxy) await page.authenticate({ username: proxy.username, password: proxy.password });
+            if (proxy && (proxy.username || proxy.password))
+                await page.authenticate({ username: proxy.username, password: proxy.password });
             // 抓取全程 URL 写入 evidence，供分析哪些主机/资源不必走住宅代理
             networkCapture = installNetworkCapture(page, redactText);
             await installTurnstileHook(page);

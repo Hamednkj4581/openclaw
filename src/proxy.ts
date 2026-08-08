@@ -9,7 +9,8 @@ export type ProxyConfig = {
     username: string;
     password: string;
     session: string;
-    region: string;
+    /** 原始链接序号（从 0 起），便于日志 */
+    linkIndex: number;
     sessTime: number;
 };
 
@@ -31,34 +32,116 @@ export function pacRouteForUrl(url: string): 'DIRECT' | 'PROXY' {
     return STATIC_ASSET_URL_RE.test(url) ? 'DIRECT' : 'PROXY';
 }
 
-/** 构建 711Proxy 住宅 Sticky 代理：每次调用生成新 session，出口国家由 PROXY_REGION 决定 */
-export function buildJapanStickyProxy(): ProxyConfig {
-    const baseUser = process.env.PROXY_USERNAME?.trim();
-    const password = process.env.PROXY_PASSWORD?.trim();
-    if (!baseUser || !password) throw new Error('缺少 PROXY_USERNAME / PROXY_PASSWORD');
-
-    // rotgb = Residential GB；region-XX 决定出口国家，与 gateway 主机无关
-    const host = (process.env.PROXY_HOST ?? 'us.rotgb.711proxy.com').trim();
-    const port = Number(process.env.PROXY_PORT ?? 10000);
-    const region = (process.env.PROXY_REGION ?? 'JP').trim().toUpperCase() || 'JP';
-    const sessTime = Math.min(180, Math.max(5, Number(process.env.PROXY_SESS_TIME ?? 30)));
-    // 8 位数字 session：相同值复用同一 IP；新值分配新 IP 并重新计时
-    const session = String(randomInt(10_000_000, 100_000_000));
-    // 文档格式：username-zone-custom-region-XX-session-(id)-sessTime-N
-    const username = `${baseUser}-zone-custom-region-${region}-session-${session}-sessTime-${sessTime}`;
-
-    return { host, port, server: `http://${host}:${port}`, username, password, session, region, sessTime };
+/** 解析多行/分号分隔的代理链接列表 */
+export function parseProxyLinkList(value: string): string[] {
+    return value
+        .split(/(?:\r?\n|;)+/)
+        .map(item => item.trim())
+        .filter(Boolean);
 }
 
-/** 更换 sticky session（同账号同 region），让 711Proxy 分配新出口 IP */
+/**
+ * 按账号序号轮询分配代理：5 个 job、3 条链接 → 0,1,2,0,1。
+ */
+export function pickProxyLink(links: string[], accountIndex: number): { link: string; linkIndex: number } {
+    if (!links.length) throw new Error('代理链接列表为空');
+    const index = Number.isInteger(accountIndex) && accountIndex >= 0 ? accountIndex : 0;
+    const linkIndex = index % links.length;
+    return { link: links[linkIndex], linkIndex };
+}
+
+/**
+ * 解析单条代理链接，支持：
+ * - http://user:pass@host:port
+ * - host:port:user:pass
+ * - host:port
+ */
+export function parseProxyLink(raw: string, linkIndex = 0): ProxyConfig {
+    const text = raw.trim();
+    if (!text) throw new Error('代理链接为空');
+
+    let host = '';
+    let port = 0;
+    let username = '';
+    let password = '';
+
+    if (/^https?:\/\//i.test(text)) {
+        let url: URL;
+        try {
+            url = new URL(text);
+        } catch {
+            throw new Error('代理链接不是有效 URL');
+        }
+        if (!['http:', 'https:'].includes(url.protocol))
+            throw new Error('代理链接仅支持 http/https');
+        host = url.hostname;
+        port = url.port ? Number(url.port) : url.protocol === 'https:' ? 443 : 80;
+        username = decodeURIComponent(url.username || '');
+        password = decodeURIComponent(url.password || '');
+    } else {
+        const parts = text.split(':');
+        if (parts.length === 2) {
+            host = parts[0].trim();
+            port = Number(parts[1]);
+        } else if (parts.length >= 4) {
+            host = parts[0].trim();
+            port = Number(parts[1]);
+            username = parts[2];
+            password = parts.slice(3).join(':');
+        } else {
+            throw new Error('代理链接格式应为 http://user:pass@host:port 或 host:port:user:pass');
+        }
+    }
+
+    if (!host || !Number.isFinite(port) || port <= 0 || port > 65535)
+        throw new Error('代理链接主机或端口无效');
+
+    const sessionMatch = username.match(/-session-(\d+)-sessTime-/i);
+    const session = sessionMatch?.[1] ?? String(randomInt(10_000_000, 100_000_000));
+    const sessTimeMatch = username.match(/-sessTime-(\d+)/i);
+    const sessTime = sessTimeMatch ? Number(sessTimeMatch[1]) : 30;
+
+    return {
+        host,
+        port,
+        server: `http://${host}:${port}`,
+        username,
+        password,
+        session,
+        linkIndex,
+        sessTime: Number.isFinite(sessTime) ? sessTime : 30,
+    };
+}
+
+/** 从环境变量读取链接列表，按账号序号分配并解析 */
+export function buildStickyProxyFromEnv(accountIndex = Number(process.env.WEB_ACCOUNT_INDEX || '0')): ProxyConfig {
+    const list = parseProxyLinkList(process.env.PROXY_LINKS || '');
+    const single = (process.env.PROXY_URL || '').trim();
+    const links = list.length ? list : (single ? [single] : []);
+    if (!links.length) throw new Error('缺少 PROXY_URL / PROXY_LINKS');
+    const { link, linkIndex } = pickProxyLink(links, accountIndex);
+    const proxy = parseProxyLink(link, linkIndex);
+    logger.info('已分配代理链接 #%s（共 %s 条）给账号序号 %s', linkIndex + 1, links.length, accountIndex);
+    return proxy;
+}
+
+/** @deprecated 兼容旧名 */
+export function buildJapanStickyProxy(): ProxyConfig {
+    return buildStickyProxyFromEnv();
+}
+
+/** 更换 sticky session（仅当用户名含 711 风格 session 段时生效） */
 export function rotateStickySession(proxy: ProxyConfig): void {
+    if (!/-session-\d+-sessTime-/i.test(proxy.username)) {
+        proxy.session = String(randomInt(10_000_000, 100_000_000));
+        return;
+    }
     proxy.session = String(randomInt(10_000_000, 100_000_000));
-    proxy.username = proxy.username.replace(/-session-\d+-sessTime-/, `-session-${proxy.session}-sessTime-`);
+    proxy.username = proxy.username.replace(/-session-\d+-sessTime-/i, `-session-${proxy.session}-sessTime-`);
 }
 
 /**
  * 生成 PAC：图片/字体/JS/CSS 等静态资源直连本机网络，其余（HTML/XHR 等）走住宅代理。
- * 注册只需出口 IP 像目标地区；静态资源不校验地理，直连可省住宅流量。
  */
 export function buildProxyPacUrl(proxy: Pick<ProxyConfig, 'host' | 'port'>): string {
     const pac = [
@@ -73,7 +156,7 @@ export function buildProxyPacUrl(proxy: Pick<ProxyConfig, 'host' | 'port'>): str
 
 /** 经代理探测 api.chatgpt.com：有 HTTP 响应即视为隧道可用（不校验地理） */
 export async function probeChatgptViaProxy(
-    axiosProxy: { protocol: 'http'; host: string; port: number; auth: { username: string; password: string } }
+    axiosProxy: { protocol: 'http'; host: string; port: number; auth?: { username: string; password: string } }
 ): Promise<number> {
     const response = await axios.request({
         method: 'GET',
@@ -81,7 +164,6 @@ export async function probeChatgptViaProxy(
         timeout: 20_000,
         proxy: axiosProxy,
         maxRedirects: 5,
-        // 任意 HTTP 响应都说明隧道已通；连接级失败才会抛错
         validateStatus: () => true,
         headers: { 'User-Agent': 'Mozilla/5.0' },
         responseType: 'stream',
@@ -91,29 +173,38 @@ export async function probeChatgptViaProxy(
     return response.status;
 }
 
-/** 启动浏览器前预检：只测代理访问 ChatGPT API 是否可达；失败则换 sticky session 重试 */
+/** 启动浏览器前预检：只测代理访问 ChatGPT API 是否可达；失败则尝试换 sticky session 重试 */
 export async function preflightProxy(proxy: ProxyConfig): Promise<void> {
-    const axiosProxy = {
-        protocol: 'http' as const,
+    const axiosProxy: {
+        protocol: 'http';
+        host: string;
+        port: number;
+        auth?: { username: string; password: string };
+    } = {
+        protocol: 'http',
         host: proxy.host,
         port: proxy.port,
-        auth: { username: proxy.username, password: proxy.password },
     };
+    if (proxy.username || proxy.password) {
+        axiosProxy.auth = { username: proxy.username, password: proxy.password };
+    }
     let lastError = '';
     for (let sessionAttempt = 1; sessionAttempt <= MAX_SESSION_ATTEMPTS; sessionAttempt++) {
-        axiosProxy.auth = { username: proxy.username, password: proxy.password };
+        if (proxy.username || proxy.password) {
+            axiosProxy.auth = { username: proxy.username, password: proxy.password };
+        }
         try {
             const status = await probeChatgptViaProxy(axiosProxy);
-            logger.info('711Proxy 可用性预检通过：api.chatgpt.com/v1 status=%s session=%s attempt=%s',
-                status, proxy.session, sessionAttempt);
+            logger.info('代理可用性预检通过：api.chatgpt.com/v1 status=%s link=#%s attempt=%s',
+                status, proxy.linkIndex + 1, sessionAttempt);
             return;
         } catch (error) {
             lastError = axios.isAxiosError(error) ? error.message : String(error);
             if (sessionAttempt >= MAX_SESSION_ATTEMPTS) break;
-            logger.warn('711Proxy 可用性预检失败：%s；更换 sticky session 重试 %s/%s',
+            logger.warn('代理可用性预检失败：%s；更换 sticky session 重试 %s/%s',
                 lastError, sessionAttempt + 1, MAX_SESSION_ATTEMPTS);
             rotateStickySession(proxy);
         }
     }
-    throw new Error(`711Proxy 可用性预检失败：${lastError}`);
+    throw new Error(`代理可用性预检失败：${lastError}`);
 }

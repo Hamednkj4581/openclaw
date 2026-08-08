@@ -10,7 +10,7 @@ import logger from './logger.js';
 import githubAnnotation from './annotations.js';
 import { installTurnstileHook, solveCloudflareIfPresent, validateCapSolver } from './capsolver.js';
 import { installNetworkCapture } from './networkCapture.js';
-import { buildJapanStickyProxy, buildProxyPacUrl, is711ProxyEnabled, preflightProxy, rotateStickySession } from './proxy.js';
+import { buildStickyProxyFromEnv, buildProxyPacUrl, is711ProxyEnabled, preflightProxy, rotateStickySession } from './proxy.js';
 import {
     AUTHENTICATED_SELECTORS,
     CONTINUE_SELECTORS,
@@ -359,19 +359,19 @@ async function extractAccessToken(page: Page): Promise<string> {
         await notifyWebProgress('准备完成，正在打开服务…', account.email);
 
         const enable711Proxy = is711ProxyEnabled();
-        const proxy = enable711Proxy ? buildJapanStickyProxy() : null;
+        const proxy = enable711Proxy ? buildStickyProxyFromEnv() : null;
         if (proxy) {
-            sensitiveValues.add(proxy.password);
-            sensitiveValues.add(process.env.PROXY_USERNAME ?? '');
+            if (proxy.password) sensitiveValues.add(proxy.password);
+            if (proxy.username) sensitiveValues.add(proxy.username);
         } else {
-            logger.info('711Proxy 已关闭（ENABLE_711_PROXY），浏览器直连');
+            logger.info('代理已关闭（ENABLE_711_PROXY），浏览器直连');
         }
 
         let page!: Page;
         for (let attempt = 1; attempt <= MAX_OPEN_CHATGPT_ATTEMPTS; attempt++) {
             if (proxy) {
                 await preflightProxy(proxy);
-                logger.info('711Proxy 预检通过：%s region=%s session=%s', proxy.server, proxy.region, proxy.session);
+                logger.info('代理预检通过：%s link=#%s session=%s', proxy.server, proxy.linkIndex + 1, proxy.session);
             }
             chrome = await puppeteer.launch({
                 headless: os.platform() === 'linux',
@@ -388,7 +388,8 @@ async function extractAccessToken(page: Page): Promise<string> {
             logger.info(chrome.process()?.spawnfile, await chrome.version());
             page = await chrome.newPage();
             await page.setViewport({ width: 1920, height: 1080 });
-            if (proxy) await page.authenticate({ username: proxy.username, password: proxy.password });
+            if (proxy && (proxy.username || proxy.password))
+                await page.authenticate({ username: proxy.username, password: proxy.password });
             networkCapture = installNetworkCapture(page, redactText);
             await installTurnstileHook(page);
             await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 60_000, retries: 2 });

@@ -31,13 +31,8 @@ on:
         required: false
         default: ''
         type: string
-      proxy_username:
-        description: '711Proxy 账号（启用代理时由客户端填写）'
-        required: false
-        default: ''
-        type: string
-      proxy_password:
-        description: '711Proxy 密码（启用代理时由客户端填写）'
+      proxy_links:
+        description: '代理链接列表（每行一条；多账号按序号轮询分配）'
         required: false
         default: ''
         type: string
@@ -87,8 +82,7 @@ jobs:
       enable_mfa: ${{ inputs.enable_mfa }}
       enable_711_proxy: ${{ inputs.enable_711_proxy }}
       proxy_region: ${{ inputs.proxy_region }}
-      proxy_username: ${{ inputs.proxy_username }}
-      proxy_password: ${{ inputs.proxy_password }}
+      proxy_links: ${{ inputs.proxy_links }}
       hold_minutes: ${{ inputs.hold_minutes }}
       payment_link_type: ${{ inputs.payment_link_type }}
       payment_card: ${{ inputs.payment_card }}

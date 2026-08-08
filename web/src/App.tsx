@@ -30,27 +30,27 @@ const PROXY_REGION_OPTIONS = [
   { value: 'PH', label: '菲律宾' },
 ];
 
-const PROXY_STORAGE_KEY = 'gpt-web-console.proxy.v1';
+const PROXY_STORAGE_KEY = 'gpt-web-console.proxy.v2';
 
-type ProxyCreds = { username: string; password: string };
 type ProxyStore = {
   region: string;
-  credentials: Record<string, ProxyCreds>;
+  /** 各地区代理链接文本（多行） */
+  linksByRegion: Record<string, string>;
 };
 
 function readProxyStore(): ProxyStore {
   try {
     const raw = localStorage.getItem(PROXY_STORAGE_KEY);
-    if (!raw) return { region: 'JP', credentials: {} };
+    if (!raw) return { region: 'JP', linksByRegion: {} };
     const parsed = JSON.parse(raw) as ProxyStore;
-    if (!parsed || typeof parsed !== 'object') return { region: 'JP', credentials: {} };
+    if (!parsed || typeof parsed !== 'object') return { region: 'JP', linksByRegion: {} };
     return {
       region: typeof parsed.region === 'string' && parsed.region ? parsed.region : 'JP',
-      credentials:
-        parsed.credentials && typeof parsed.credentials === 'object' ? parsed.credentials : {},
+      linksByRegion:
+        parsed.linksByRegion && typeof parsed.linksByRegion === 'object' ? parsed.linksByRegion : {},
     };
   } catch {
-    return { region: 'JP', credentials: {} };
+    return { region: 'JP', linksByRegion: {} };
   }
 }
 
@@ -58,14 +58,11 @@ function writeProxyStore(store: ProxyStore): void {
   localStorage.setItem(PROXY_STORAGE_KEY, JSON.stringify(store));
 }
 
-function saveProxyRegionCreds(region: string, username: string, password: string): void {
+function saveProxyRegionLinks(region: string, links: string): void {
   if (!region || region === 'none') return;
   const store = readProxyStore();
   store.region = region;
-  store.credentials[region] = {
-    username: username.trim(),
-    password: password,
-  };
+  store.linksByRegion[region] = links;
   writeProxyStore(store);
 }
 
@@ -87,8 +84,7 @@ interface TaskFormValues {
   forwarding_emails: string;
   enable_mfa: boolean;
   proxy_region: string;
-  proxy_username: string;
-  proxy_password: string;
+  proxy_links: string;
   hold_minutes: number;
   payment_link_type: string;
   payment_card: string;
@@ -167,17 +163,15 @@ export default function App() {
     proxyRegionRef.current = proxyRegion;
   }, [proxyRegion]);
 
-  // 启动时恢复上次地区与对应代理凭据
+  // 启动时恢复上次地区与对应代理链接
   useEffect(() => {
     const store = readProxyStore();
     const region = PROXY_REGION_OPTIONS.some((item) => item.value === store.region)
       ? store.region
       : 'JP';
-    const creds = store.credentials[region] || { username: '', password: '' };
     form.setFieldsValue({
       proxy_region: region,
-      proxy_username: creds.username || '',
-      proxy_password: creds.password || '',
+      proxy_links: store.linksByRegion[region] || '',
     });
     proxyRegionRef.current = region;
   }, [form]);
@@ -224,7 +218,7 @@ export default function App() {
     setSubmitting(true);
     try {
       if (isProxyEnabled(values.proxy_region)) {
-        saveProxyRegionCreds(values.proxy_region, values.proxy_username, values.proxy_password);
+        saveProxyRegionLinks(values.proxy_region, values.proxy_links || '');
       } else {
         const store = readProxyStore();
         store.region = 'none';
@@ -234,8 +228,7 @@ export default function App() {
         accounts: values.accounts,
         enable_711_proxy: isProxyEnabled(values.proxy_region),
         proxy_region: isProxyEnabled(values.proxy_region) ? values.proxy_region : '',
-        proxy_username: isProxyEnabled(values.proxy_region) ? values.proxy_username.trim() : '',
-        proxy_password: isProxyEnabled(values.proxy_region) ? values.proxy_password : '',
+        proxy_links: isProxyEnabled(values.proxy_region) ? (values.proxy_links || '').trim() : '',
         payment_link_type: values.payment_link_type,
         payment_card: values.payment_card,
         hold_minutes: Number(values.hold_minutes) || 15,
@@ -297,8 +290,7 @@ export default function App() {
             forwarding_emails: FORWARDING_EMAIL_OPTIONS[0].value,
             enable_mfa: true,
             proxy_region: 'JP',
-            proxy_username: '',
-            proxy_password: '',
+            proxy_links: '',
             hold_minutes: 15,
             payment_link_type: '未选择',
             payment_card: '',
@@ -353,10 +345,10 @@ export default function App() {
                   const current = form.getFieldsValue();
                   const prevRegion = proxyRegionRef.current;
                   if (prevRegion && prevRegion !== 'none') {
-                    saveProxyRegionCreds(prevRegion, current.proxy_username || '', current.proxy_password || '');
+                    saveProxyRegionLinks(prevRegion, current.proxy_links || '');
                   }
                   if (!nextRegion || nextRegion === 'none') {
-                    form.setFieldsValue({ proxy_username: '', proxy_password: '' });
+                    form.setFieldsValue({ proxy_links: '' });
                     const store = readProxyStore();
                     store.region = 'none';
                     writeProxyStore(store);
@@ -366,10 +358,8 @@ export default function App() {
                   const store = readProxyStore();
                   store.region = nextRegion;
                   writeProxyStore(store);
-                  const creds = store.credentials[nextRegion] || { username: '', password: '' };
                   form.setFieldsValue({
-                    proxy_username: creds.username || '',
-                    proxy_password: creds.password || '',
+                    proxy_links: store.linksByRegion[nextRegion] || '',
                   });
                   proxyRegionRef.current = nextRegion;
                 }}
@@ -378,41 +368,24 @@ export default function App() {
           </Space>
 
           {isProxyEnabled(proxyRegion) ? (
-            <>
-              <Form.Item
-                label="代理账号"
-                name="proxy_username"
-                rules={[{ required: true, message: '请填写代理账号' }]}
-                extra="按地区保存在本浏览器，切换地区会自动切换账号"
-              >
-                <Input
-                  placeholder="711Proxy 用户名"
-                  autoComplete="off"
-                  onBlur={() => {
-                    const values = form.getFieldsValue();
-                    if (isProxyEnabled(values.proxy_region)) {
-                      saveProxyRegionCreds(values.proxy_region, values.proxy_username || '', values.proxy_password || '');
-                    }
-                  }}
-                />
-              </Form.Item>
-              <Form.Item
-                label="代理密码"
-                name="proxy_password"
-                rules={[{ required: true, message: '请填写代理密码' }]}
-              >
-                <Input.Password
-                  placeholder="711Proxy 密码"
-                  autoComplete="off"
-                  onBlur={() => {
-                    const values = form.getFieldsValue();
-                    if (isProxyEnabled(values.proxy_region)) {
-                      saveProxyRegionCreds(values.proxy_region, values.proxy_username || '', values.proxy_password || '');
-                    }
-                  }}
-                />
-              </Form.Item>
-            </>
+            <Form.Item
+              label="代理链接"
+              name="proxy_links"
+              rules={[{ required: true, message: '请填写至少一条代理链接' }]}
+              extra="每行一条；多账号按顺序轮询分配（例如 5 个账号、3 条链接 → 1,2,3,1,2）。支持 http://user:pass@host:port 或 host:port:user:pass"
+            >
+              <TextArea
+                rows={4}
+                placeholder={'http://user:pass@host:10000\nhost:10000:user:pass'}
+                autoComplete="off"
+                onBlur={() => {
+                  const values = form.getFieldsValue();
+                  if (isProxyEnabled(values.proxy_region)) {
+                    saveProxyRegionLinks(values.proxy_region, values.proxy_links || '');
+                  }
+                }}
+              />
+            </Form.Item>
           ) : null}
 
           <Form.Item label="支付提链" name="payment_link_type">

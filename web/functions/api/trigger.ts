@@ -13,8 +13,7 @@ interface TriggerBody {
   enable_mfa?: boolean;
   enable_711_proxy?: boolean;
   proxy_region?: string;
-  proxy_username?: string;
-  proxy_password?: string;
+  proxy_links?: string;
   payment_link_type?: string;
   payment_card?: string;
   hold_minutes?: number | string;
@@ -26,6 +25,13 @@ function requireEnv(env: Env): string | null {
   if (!env.WEBHOOK_SECRET) return '服务未配置';
   if (!env.TASKS) return '服务未配置';
   return null;
+}
+
+function parseProxyLinks(value: string): string[] {
+  return value
+    .split(/(?:\r?\n|;)+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
@@ -55,14 +61,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const enableProxy =
     body.enable_711_proxy === true || (proxyRegionRaw !== '' && proxyRegionRaw !== 'NONE');
   const proxyRegion = enableProxy ? proxyRegionRaw : '';
-  const proxyUsername = (body.proxy_username || '').trim();
-  const proxyPassword = (body.proxy_password || '').trim();
+  const proxyLinks = parseProxyLinks(body.proxy_links || '').join('\n');
   if (enableProxy) {
     if (!PROXY_REGIONS.has(proxyRegion)) {
       return friendlyError(400, '请选择有效的代理地区');
     }
-    if (!proxyUsername || !proxyPassword) {
-      return friendlyError(400, '启用代理时请填写代理账号和密码');
+    if (!proxyLinks) {
+      return friendlyError(400, '启用代理时请填写至少一条代理链接');
     }
   }
 
@@ -87,8 +92,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     web_task_id: taskId,
     enable_711_proxy: String(enableProxy),
     proxy_region: proxyRegion,
-    proxy_username: enableProxy ? proxyUsername : '',
-    proxy_password: enableProxy ? proxyPassword : '',
+    proxy_links: enableProxy ? proxyLinks : '',
     payment_link_type: paymentLinkType,
     payment_card: paymentLinkType === 'gcash' ? paymentCard : '',
     hold_minutes: holdMinutes,

@@ -4,9 +4,13 @@ import logger from './logger.js';
 const QR_WAIT_MS = 45_000;
 const MAX_DATA_URL_CHARS = 400_000;
 /** 截屏左右留白，让二维码在画面中更居中 */
-const CLIP_PAD_X = 56;
-/** 截屏上下留白（略小于左右，贴近示意截图比例） */
-const CLIP_PAD_Y = 32;
+const CLIP_PAD_X = 40;
+/** 截屏上方留白 */
+const CLIP_PAD_TOP = 24;
+/** 截屏下方留白（宜小，避免裁进 Instructions） */
+const CLIP_PAD_BOTTOM = 12;
+/** 截屏前把二维码放大到该边长，贴近示意效果 */
+const QR_DISPLAY_SIZE = 220;
 
 export type ProxyAuth = { username: string; password: string };
 
@@ -21,36 +25,40 @@ type ClipRect = { x: number; y: number; width: number; height: number };
 
 /** 计算「扫码提示文案 + 二维码」区域，并按二维码中心左右对称留白 */
 async function resolveQrClip(page: Page): Promise<ClipRect> {
-    const clip = await page.evaluate((padX, padY) => {
+    const clip = await page.evaluate((padX, padTop, padBottom) => {
         const qr = document.querySelector('#qrcode') as HTMLElement | null;
-        if (!qr) return null;
-        const img = qr.querySelector('img') as HTMLImageElement | null;
-        if (!img || img.naturalWidth < 50) return null;
+        const img = qr?.querySelector('img') as HTMLImageElement | null;
+        if (!qr || !img || img.naturalWidth < 50) return null;
 
+        // 取面积最小的匹配节点，避免命中整块 .qr-section 容器
         let tip: HTMLElement | null = null;
+        let tipArea = Number.POSITIVE_INFINITY;
         for (const el of Array.from(document.querySelectorAll('p, div, span, h1, h2, h3, label'))) {
             const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
-            if (/Scan the QR code with GCash/i.test(text) && text.length < 120) {
+            if (!/Scan the QR code with GCash/i.test(text) || text.length >= 120) continue;
+            const rect = el.getBoundingClientRect();
+            const area = rect.width * rect.height;
+            if (area > 0 && area < tipArea) {
                 tip = el as HTMLElement;
-                break;
+                tipArea = area;
             }
         }
 
-        const qrRect = qr.getBoundingClientRect();
+        const imgRect = img.getBoundingClientRect();
         const tipRect = tip?.getBoundingClientRect();
-        const contentLeft = tipRect ? Math.min(tipRect.left, qrRect.left) : qrRect.left;
-        const contentRight = tipRect ? Math.max(tipRect.right, qrRect.right) : qrRect.right;
-        const contentTop = tipRect ? Math.min(tipRect.top, qrRect.top) : qrRect.top;
-        const contentBottom = tipRect ? Math.max(tipRect.bottom, qrRect.bottom) : qrRect.bottom;
+        const contentLeft = tipRect ? Math.min(tipRect.left, imgRect.left) : imgRect.left;
+        const contentRight = tipRect ? Math.max(tipRect.right, imgRect.right) : imgRect.right;
+        // 上沿用提示文案；若提示节点过高（容器），至少盖住文案顶部
+        const contentTop = tipRect ? Math.min(tipRect.top, imgRect.top) : imgRect.top;
+        const contentBottom = imgRect.bottom;
 
-        const qrCenterX = qrRect.left + qrRect.width / 2;
-        // 以二维码中心为轴，左右对称扩开，避免二维码偏一侧
-        let halfW = Math.max(qrCenterX - contentLeft, contentRight - qrCenterX, qrRect.width / 2);
+        const qrCenterX = imgRect.left + imgRect.width / 2;
+        let halfW = Math.max(qrCenterX - contentLeft, contentRight - qrCenterX, imgRect.width / 2);
         halfW += padX;
         let left = qrCenterX - halfW;
         let right = qrCenterX + halfW;
-        let top = contentTop - padY;
-        let bottom = contentBottom + padY;
+        let top = contentTop - padTop;
+        let bottom = contentBottom + padBottom;
 
         const vw = window.innerWidth;
         const vh = window.innerHeight;
@@ -63,7 +71,7 @@ async function resolveQrClip(page: Page): Promise<ClipRect> {
         const height = bottom - top;
         if (width < 80 || height < 80) return null;
         return { x: left, y: top, width, height };
-    }, CLIP_PAD_X, CLIP_PAD_Y);
+    }, CLIP_PAD_X, CLIP_PAD_TOP, CLIP_PAD_BOTTOM);
     if (!clip) throw new Error('无法定位二维码截屏区域');
     return clip;
 }
@@ -107,8 +115,15 @@ export async function capturePaymentQr(
         await page.$eval('#qrcode', (el) => {
             el.scrollIntoView({ block: 'center', inline: 'center' });
         });
-        // 滚动后等一帧，避免裁剪坐标抖动
-        await new Promise((resolve) => setTimeout(resolve, 200));
+        // 放大二维码，截屏更接近示意效果；不影响页面会话本身
+        await page.$eval('#qrcode img', (img, size) => {
+            const el = img as HTMLImageElement;
+            el.style.width = `${size}px`;
+            el.style.height = `${size}px`;
+            el.style.maxWidth = 'none';
+            el.style.maxHeight = 'none';
+        }, QR_DISPLAY_SIZE);
+        await new Promise((resolve) => setTimeout(resolve, 250));
 
         const clip = await resolveQrClip(page);
         const bytes = await page.screenshot({

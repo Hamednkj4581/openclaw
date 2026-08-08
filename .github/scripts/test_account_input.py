@@ -3,6 +3,7 @@ import unittest
 from account_input import (
     parse_accounts,
     parse_email_list,
+    parse_login_accounts,
     parse_outlook_mailboxes,
     resolve_forward_mailbox,
 )
@@ -72,6 +73,28 @@ class ForwardMailboxTest(unittest.TestCase):
     def test_parse_outlook_mailboxes_indexes_by_email(self) -> None:
         mailboxes = parse_outlook_mailboxes(self.mailbox)
         self.assertIn("timmothybegan9059@hotmail.com", mailboxes)
+
+
+class ParseLoginAccountsTest(unittest.TestCase):
+    def test_parses_totp_only(self) -> None:
+        rows = parse_login_accounts("user@example.com----Pass----AJYTL5F5HRHUTOWA2ESYBJOKC2FBSRLD")
+        self.assertEqual(rows[0].otp_secret, "AJYTL5F5HRHUTOWA2ESYBJOKC2FBSRLD")
+        self.assertFalse(rows[0].has_inline_mail)
+
+    def test_parses_outlook_pickup_with_totp(self) -> None:
+        rows = parse_login_accounts(
+            "user@example.com----Pass----client----refresh----AJYTL5F5HRHUTOWA2ESYBJOKC2FBSRLD"
+        )
+        self.assertEqual(rows[0].client_id, "client")
+        self.assertEqual(rows[0].refresh_token, "refresh")
+        self.assertTrue(rows[0].has_inline_mail)
+
+    def test_parses_webmail_and_totp(self) -> None:
+        rows = parse_login_accounts(
+            "user@example.com----Pass----https://mail.example/x----AJYTL5F5HRHUTOWA2ESYBJOKC2FBSRLD"
+        )
+        self.assertEqual(rows[0].webmail_url, "https://mail.example/x")
+        self.assertEqual(rows[0].otp_secret, "AJYTL5F5HRHUTOWA2ESYBJOKC2FBSRLD")
 
 
 if __name__ == "__main__":

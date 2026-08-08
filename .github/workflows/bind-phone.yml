@@ -8,8 +8,13 @@ on:
         required: true
         type: string
       accounts:
-        description: '多个账号用英文分号 ; 分隔（也兼容换行）：email----password----2fa'
+        description: '多个账号用英文分号 ; 分隔：email----password----2fa；或 Outlook/iCloud/网页取件格式；可选转发邮箱'
         required: true
+        type: string
+      forwarding_emails:
+        description: '转发收件箱（无行内取件时收验证邮件用）'
+        required: false
+        default: 'TimmothyBegan9059@hotmail.com'
         type: string
       enable_711_proxy:
         description: '启用 711Proxy 住宅代理（关闭则直连）'
@@ -77,6 +82,7 @@ jobs:
       mode: bind_phone
       commit_message: ${{ inputs.commit_message }}
       accounts: ${{ inputs.accounts }}
+      forwarding_emails: ${{ inputs.forwarding_emails }}
       enable_711_proxy: ${{ inputs.enable_711_proxy }}
       proxy_region: ${{ inputs.proxy_region }}
       proxy_username: ${{ inputs.proxy_username }}

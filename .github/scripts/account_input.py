@@ -1,9 +1,42 @@
 import re
+from dataclasses import dataclass
 
 
 ACCOUNT_SEPARATOR = re.compile(r"(?:\r?\n|;)+")
 FIELD_SEPARATOR = re.compile(r"-{4,}")
 EMAIL_RE = re.compile(r"^\S+@\S+\.\S+$")
+_BASE32_RE = re.compile(r"^[A-Z2-7=]+$", re.IGNORECASE)
+_URL_RE = re.compile(r"^https?://", re.IGNORECASE)
+
+
+def _is_base32(value: str) -> bool:
+    compact = value.replace(" ", "")
+    if len(compact) < 10:
+        return False
+    return bool(_BASE32_RE.match(compact))
+
+
+def _is_url(value: str) -> bool:
+    return bool(_URL_RE.match(value.strip()))
+
+
+@dataclass
+class LoginAccountRecord:
+    email: str
+    password: str
+    otp_secret: str | None = None
+    icloud_api_key: str | None = None
+    webmail_url: str | None = None
+    client_id: str | None = None
+    refresh_token: str | None = None
+
+    @property
+    def has_inline_mail(self) -> bool:
+        return bool(
+            self.icloud_api_key
+            or self.webmail_url
+            or (self.client_id and self.refresh_token)
+        )
 
 
 def parse_accounts(value: str) -> list[list[str]]:
@@ -77,35 +110,128 @@ def resolve_forward_mailbox(forwarding_emails: list[str], mailboxes_text: str) -
     return fields
 
 
-_BASE32_RE = re.compile(r"^[A-Z2-7=]+$", re.IGNORECASE)
+def _parse_login_fields(fields: list[str], index: int) -> LoginAccountRecord:
+    email, password = fields[0], fields[1]
+    if not EMAIL_RE.match(email):
+        raise ValueError(f"第 {index} 个登录邮箱格式错误")
+    if not password:
+        raise ValueError(f"第 {index} 个登录密码为空")
+
+    if len(fields) >= 5:
+        third = fields[2].replace(" ", "")
+        if _is_base32(third):
+            return LoginAccountRecord(email=email, password=password, otp_secret=third)
+        otp = fields[4].replace(" ", "")
+        if not _is_base32(otp):
+            raise ValueError(f"第 {index} 个账号第五段应为 Base32 2FA 密钥")
+        return LoginAccountRecord(
+            email=email,
+            password=password,
+            otp_secret=otp,
+            client_id=fields[2],
+            refresh_token=fields[3],
+        )
+
+    if len(fields) == 4:
+        third, fourth = fields[2], fields[3]
+        if _is_base32(third):
+            return LoginAccountRecord(email=email, password=password, otp_secret=third.replace(" ", ""))
+        if _is_base32(fourth):
+            pickup = third
+            if _is_url(pickup):
+                return LoginAccountRecord(
+                    email=email,
+                    password=password,
+                    otp_secret=fourth.replace(" ", ""),
+                    webmail_url=pickup,
+                )
+            return LoginAccountRecord(
+                email=email,
+                password=password,
+                otp_secret=fourth.replace(" ", ""),
+                icloud_api_key=pickup,
+            )
+        return LoginAccountRecord(
+            email=email,
+            password=password,
+            client_id=third,
+            refresh_token=fourth,
+        )
+
+    third = fields[2]
+    if _is_base32(third):
+        return LoginAccountRecord(email=email, password=password, otp_secret=third.replace(" ", ""))
+    if _is_url(third):
+        return LoginAccountRecord(email=email, password=password, webmail_url=third)
+    return LoginAccountRecord(email=email, password=password, icloud_api_key=third)
 
 
-def parse_login_accounts(value: str) -> list[list[str]]:
-    """Parse login accounts: email----password----2fa。
+def parse_login_accounts(value: str) -> list[LoginAccountRecord]:
+    """解析登录/绑定手机账号。
 
-    对第三段做 2FA（Base32）识别；识别成功则忽略第四段及以后
-    （网页取件链接、注册结果里的 accessToken/时间等）。
+  在注册取件格式基础上额外支持 2FA（Base32）：
+  - email----password----2fa
+  - email----password----2fa----尾部可忽略
+  - email----password----取件链接或 iCloud Key----2fa
+  - email----password----client_id----refresh_token
+  - email----password----client_id----refresh_token----2fa
     """
     records = [record.strip() for record in ACCOUNT_SEPARATOR.split(value) if record.strip()]
     if not records:
         raise ValueError("accounts 输入不能为空")
 
-    accounts: list[list[str]] = []
+    accounts: list[LoginAccountRecord] = []
     for index, record in enumerate(records, 1):
         fields = [field.strip() for field in FIELD_SEPARATOR.split(record) if field.strip()]
         if len(fields) < 3:
             raise ValueError(
-                f"第 {index} 个登录账号格式错误，必须是 email----password----2fa；"
+                f"第 {index} 个登录账号格式错误，至少须为 email----password----2fa 或取件字段；"
                 "多个账号请用分号或换行分隔"
             )
-        email, password, third = fields[0], fields[1], fields[2]
-        if not EMAIL_RE.match(email):
-            raise ValueError(f"第 {index} 个登录邮箱格式错误")
-        if not password:
-            raise ValueError(f"第 {index} 个登录密码为空")
-        otp = third.replace(" ", "")
-        if not _BASE32_RE.match(otp):
-            raise ValueError(f"第 {index} 个 2FA 密钥应为 Base32（TOTP secret）")
-        # 第三段已识别为 2FA，丢弃第四段及以后
-        accounts.append([email, password, otp])
+        accounts.append(_parse_login_fields(fields, index))
     return accounts
+
+
+def split_account_records(value: str) -> list[str]:
+    return [record.strip() for record in ACCOUNT_SEPARATOR.split(value) if record.strip()]
+
+
+def apply_login_account_env(
+    env_file,
+    raw_line: str,
+    record: LoginAccountRecord,
+    forwarding_emails: list[str],
+    mailboxes_text: str,
+) -> None:
+    """写入登录/绑定手机 job 所需环境变量（含取件凭据）。"""
+    env_file.write(f"CHATGPT_LOGIN<<__LOGIN_VALUE__\n{raw_line}\n__LOGIN_VALUE__\n")
+    env_file.write(f"ACCOUNT_EMAIL<<__EMAIL_VALUE__\n{record.email}\n__EMAIL_VALUE__\n")
+    env_file.write(f"EMAIL<<__EMAIL_VALUE__\n{record.email}\n__EMAIL_VALUE__\n")
+
+    if record.webmail_url:
+        print(f"::add-mask::{record.webmail_url}")
+        env_file.write(
+            f"ICLOUD_API_KEY<<__ACCOUNT_VALUE__\n{record.webmail_url}\n__ACCOUNT_VALUE__\n"
+        )
+    elif record.icloud_api_key:
+        print(f"::add-mask::{record.icloud_api_key}")
+        env_file.write(
+            f"ICLOUD_API_KEY<<__ACCOUNT_VALUE__\n{record.icloud_api_key}\n__ACCOUNT_VALUE__\n"
+        )
+    elif record.client_id and record.refresh_token:
+        print(f"::add-mask::{record.client_id}")
+        print(f"::add-mask::{record.refresh_token}")
+        env_file.write(f"CLIENT_ID<<__ACCOUNT_VALUE__\n{record.client_id}\n__ACCOUNT_VALUE__\n")
+        env_file.write(
+            f"REFRESH_TOKEN<<__ACCOUNT_VALUE__\n{record.refresh_token}\n__ACCOUNT_VALUE__\n"
+        )
+    elif forwarding_emails:
+        mailbox = resolve_forward_mailbox(forwarding_emails, mailboxes_text)
+        for name, value in {
+            "MAILBOX_EMAIL": mailbox[0],
+            "EMAIL_PASSWORD": mailbox[1],
+            "CLIENT_ID": mailbox[2],
+            "REFRESH_TOKEN": mailbox[3],
+        }.items():
+            print(f"::add-mask::{value}")
+            env_file.write(f"{name}<<__ACCOUNT_VALUE__\n{value}\n__ACCOUNT_VALUE__\n")

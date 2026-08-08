@@ -30,6 +30,28 @@ export function credentialsFromEnv(): MailCredentials {
     };
 }
 
+/** 登录/绑定手机：有取件环境变量时返回凭据，否则 null */
+export function credentialsFromLoginEnv(): MailCredentials | null {
+    const email = (process.env.EMAIL || process.env.ACCOUNT_EMAIL || '').trim();
+    if (!email) return null;
+    const apiKey = process.env.ICLOUD_API_KEY?.trim();
+    if (apiKey && /^https?:\/\//i.test(apiKey))
+        return { provider: 'webmail', email, mailboxUrl: apiKey };
+    if (apiKey)
+        return { provider: 'icloud', email, apiKey };
+    const clientId = process.env.CLIENT_ID?.trim();
+    const refreshToken = process.env.REFRESH_TOKEN?.trim();
+    if (!clientId || !refreshToken) return null;
+    const mailboxEmail = process.env.MAILBOX_EMAIL?.trim();
+    return {
+        provider: 'outlook',
+        email,
+        clientId,
+        refreshToken,
+        ...(mailboxEmail ? { mailboxEmail } : {}),
+    };
+}
+
 export async function preflightMail(credentials: MailCredentials): Promise<void> {
     if (credentials.provider === 'icloud') return preflightICloud(credentials);
     if (credentials.provider === 'webmail') return preflightWebMail(credentials);

@@ -126,16 +126,25 @@ jobs:
 
           sys.path.insert(0, '.github/scripts')
           from account_input import (
+              apply_login_account_env,
               parse_accounts,
               parse_email_list,
               parse_login_accounts,
               resolve_forward_mailbox,
+              split_account_records,
           )
 
           mode = (os.environ.get('TASK_MODE') or '').strip().lower()
           try:
               if mode in ('login', 'bind_phone'):
                   accounts = parse_login_accounts(os.environ['ACCOUNTS'])
+                  forwarding = (
+                      parse_email_list(os.environ.get('FORWARDING_EMAILS', ''))
+                      if (os.environ.get('FORWARDING_EMAILS') or '').strip()
+                      else []
+                  )
+                  if forwarding:
+                      resolve_forward_mailbox(forwarding, os.environ.get('FORWARD_MAILBOXES', ''))
               elif mode == 'register':
                   accounts = parse_accounts(os.environ['ACCOUNTS'])
                   if any(len(account) == 1 for account in accounts):
@@ -149,7 +158,12 @@ jobs:
               raise SystemExit(str(error)) from None
 
           items = [
-              {'account_index': index, 'email': account[0].strip().lower()}
+              {
+                  'account_index': index,
+                  'email': (
+                      account.email if hasattr(account, 'email') else account[0]
+                  ).strip().lower(),
+              }
               for index, account in enumerate(accounts)
           ]
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
@@ -197,21 +211,33 @@ jobs:
 
           sys.path.insert(0, '.github/scripts')
           from account_input import (
+              apply_login_account_env,
               parse_accounts,
               parse_email_list,
               parse_login_accounts,
               resolve_forward_mailbox,
+              split_account_records,
           )
 
           mode = (os.environ.get('TASK_MODE') or '').strip().lower()
           index = int(os.environ['ACCOUNT_INDEX'])
           with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env_file:
               if mode in ('login', 'bind_phone'):
-                  # 不使用 ::add-mask::：避免日志里 access token 被误掩码
-                  email, password, otp = parse_login_accounts(os.environ['ACCOUNTS'])[index]
-                  login_line = f'{email}----{password}----{otp}'
-                  env_file.write(f'CHATGPT_LOGIN<<__LOGIN_VALUE__\n{login_line}\n__LOGIN_VALUE__\n')
-                  env_file.write(f'ACCOUNT_EMAIL<<__EMAIL_VALUE__\n{email}\n__EMAIL_VALUE__\n')
+                  raw_records = split_account_records(os.environ['ACCOUNTS'])
+                  record = parse_login_accounts(os.environ['ACCOUNTS'])[index]
+                  forwarding = (
+                      parse_email_list(os.environ.get('FORWARDING_EMAILS', ''))
+                      if (os.environ.get('FORWARDING_EMAILS') or '').strip()
+                      else []
+                  )
+                  print(f'::add-mask::{record.password}')
+                  apply_login_account_env(
+                      env_file,
+                      raw_records[index],
+                      record,
+                      forwarding,
+                      os.environ.get('FORWARD_MAILBOXES', ''),
+                  )
               else:
                   fields = parse_accounts(os.environ['ACCOUNTS'])[index]
                   if len(fields) == 1:

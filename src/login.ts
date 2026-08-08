@@ -23,6 +23,7 @@ import {
 } from './selectors.js';
 import { parseLoginAccount } from './loginAccount.js';
 import { cookieFileNameForEmail, writeCookieEditorJson } from './cookieExport.js';
+import { credentialsFromLoginEnv, preflightMail, waitForMailVerification } from './mailProvider.js';
 import {
     finishAccountSuccess,
     notifyWebAccountFailure,
@@ -36,8 +37,9 @@ import { bindPhoneWithRetry, isBindPhoneMode } from './phoneBind.js';
 const MAX_TIMEOUT = Math.pow(2, 31) - 1;
 const EVIDENCE_TIMEOUT_MS = 15_000;
 const MAX_OPEN_CHATGPT_ATTEMPTS = 3;
+const VERIFICATION_EMAIL_TIMEOUT_MS = 30_000;
 
-type LoginState = 'email' | 'password' | 'mfa-challenge' | 'authenticated' | 'unknown';
+type LoginState = 'email' | 'password' | 'email-verification' | 'code' | 'mfa-challenge' | 'authenticated' | 'unknown';
 
 const sensitiveValues = new Set<string>();
 
@@ -221,6 +223,8 @@ async function detectState(page: Page): Promise<LoginState> {
             if (await first(page, AUTHENTICATED_SELECTORS)) return 'authenticated';
         }
         if (/\/mfa-challenge(?:[/?#]|$)/i.test(url) || await first(page, MFA_CHALLENGE_SELECTORS)) return 'mfa-challenge';
+        if (await first(page, ["//input[@name='code' or @autocomplete='one-time-code' or @inputmode='numeric']"])) return 'code';
+        if (/email-verification/i.test(url) || await first(page, ["//*[contains(translate(normalize-space(.), 'VERIFY YOUR EMAILCHECK YOUR EMAIL', 'verify your emailcheck your email'), 'verify your email') or contains(translate(normalize-space(.), 'VERIFY YOUR EMAILCHECK YOUR EMAIL', 'verify your emailcheck your email'), 'check your email')]"])) return 'email-verification';
         if (await first(page, ["//input[@type='password' and not(@disabled)]"])) return 'password';
         if (await first(page, SIGNUP_EMAIL_SELECTORS)) return 'email';
         return 'unknown';
@@ -297,12 +301,14 @@ async function openLogin(page: Page): Promise<void> {
     throw new Error(`打开 ChatGPT 登录入口超时（${lastError || '未知'}），URL：${page.url().replace(/[?#].*$/, '')}`);
 }
 
-async function submitMfa(page: Page, otpSecret: string): Promise<void> {
+async function submitMfa(page: Page, otpSecret: string | undefined): Promise<void> {
+    if (!otpSecret?.trim())
+        throw new Error('当前账号需要验证器 2FA，但输入中未提供 Base32 密钥');
     const codeInput = await Utility.waitForFunction(
         () => first(page, MFA_CODE_SELECTORS),
         { timeout: 30_000 }
     );
-    const code = authenticator.generate(otpSecret);
+    const code = authenticator.generate(otpSecret.trim());
     await codeInput.click({ clickCount: 3 }).catch(() => undefined);
     await codeInput.type(code);
     const verifyButton = await first(page, MFA_VERIFY_SELECTORS);
@@ -311,6 +317,42 @@ async function submitMfa(page: Page, otpSecret: string): Promise<void> {
         return;
     }
     await clickContinue(page);
+}
+
+/** 邮箱验证码 / 验证链接（取件模式） */
+async function handleEmailVerification(
+    page: Page,
+    email: string,
+    receivedAfter: number,
+): Promise<void> {
+    const credentials = credentialsFromLoginEnv();
+    if (!credentials)
+        throw new Error('当前步骤需要邮箱取件，但账号未配置 iCloud/网页/Outlook 取件或转发邮箱');
+    await notifyWebProgress('正在验证邮箱，可能需要一两分钟…', email);
+    logger.info('等待 ChatGPT 验证邮件');
+    const verification = await waitForMailVerification(credentials, {
+        receivedAfter,
+        timeoutMs: credentials.provider === 'outlook' ? VERIFICATION_EMAIL_TIMEOUT_MS : 90_000,
+    });
+    logger.info('收到 ChatGPT 验证邮件，类型：%s', verification.type);
+    if (verification.type === 'link') {
+        await page.goto(verification.value);
+        await solveCloudflareIfPresent(page);
+        return;
+    }
+    const codeReady = await Utility.waitForFunction(async () => {
+        const current = await detectState(page);
+        if (current === 'mfa-challenge') return null;
+        if (current === 'authenticated') return { kind: 'advanced' as const };
+        if (current !== 'code' && current !== 'email-verification') return null;
+        const input = await first(page, ["//input[@name='code' or @autocomplete='one-time-code' or @inputmode='numeric']"]);
+        return input ? { kind: 'code' as const, input } : null;
+    }, { pollInterval: 300, timeout: 30_000 });
+    if (!codeReady) throw new Error('收到六位验证码，但当前页面没有验证码输入框');
+    if (codeReady.kind === 'code') {
+        await codeReady.input.type(verification.value);
+        await clickContinue(page);
+    }
 }
 
 async function extractAccessToken(page: Page): Promise<string> {
@@ -374,7 +416,10 @@ function writeAccountCookies(email: string, cookies: Awaited<ReturnType<Page['co
         accountEmail = account.email;
         sensitiveValues.add(account.email);
         sensitiveValues.add(account.password);
-        sensitiveValues.add(account.otpSecret);
+        if (account.otpSecret) sensitiveValues.add(account.otpSecret);
+        const mailCredentials = credentialsFromLoginEnv();
+        if (mailCredentials) await preflightMail(mailCredentials);
+        const loginStartedAt = Date.now();
         await notifyWebProgress('正在准备，请稍候…', account.email);
         await validateCapSolver();
         await notifyWebProgress('准备完成，正在打开服务…', account.email);
@@ -441,7 +486,7 @@ function writeAccountCookies(email: string, cookies: Awaited<ReturnType<Page['co
         await clickContinue(page);
         await solveCloudflareIfPresent(page);
 
-        let state = await waitForState(page, ['password', 'mfa-challenge', 'authenticated'], 45_000);
+        let state = await waitForState(page, ['password', 'email-verification', 'code', 'mfa-challenge', 'authenticated'], 45_000);
         // SSR 未水合时 Continue 只会刷新 ?email=；水合后或 login_with 再试一次
         if (state === 'email' || state === 'unknown') {
             logger.warn('邮箱 Continue 后仍为 %s，准备重试提交', state);
@@ -451,7 +496,7 @@ function writeAccountCookies(email: string, cookies: Awaited<ReturnType<Page['co
                 await clickContinue(page);
             }
             await solveCloudflareIfPresent(page);
-            state = await waitForState(page, ['password', 'mfa-challenge', 'authenticated'], 60_000);
+            state = await waitForState(page, ['password', 'email-verification', 'code', 'mfa-challenge', 'authenticated'], 60_000);
         }
         await evidence(page, `after-email-${state}`);
 
@@ -461,8 +506,15 @@ function writeAccountCookies(email: string, cookies: Awaited<ReturnType<Page['co
             await evidence(page, 'password-entered');
             await clickContinue(page);
             await solveCloudflareIfPresent(page);
-            state = await waitForState(page, ['mfa-challenge', 'authenticated']);
+            state = await waitForState(page, ['email-verification', 'code', 'mfa-challenge', 'authenticated']);
             await evidence(page, `after-password-${state}`);
+        }
+
+        if (state === 'email-verification' || state === 'code') {
+            await handleEmailVerification(page, account.email, loginStartedAt);
+            await solveCloudflareIfPresent(page);
+            state = await waitForState(page, ['mfa-challenge', 'authenticated'], 90_000);
+            await evidence(page, `after-email-verification-${state}`);
         }
 
         if (state === 'mfa-challenge') {

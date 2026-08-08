@@ -498,6 +498,7 @@ export default function App() {
             ? await triggerTask({
                 ...shared,
                 mode: 'bind_phone',
+                forwarding_emails: values.forwarding_emails,
                 hero_sms_api_key: values.hero_sms_api_key || '',
                 hero_sms_service: values.hero_sms_service || '',
                 hero_sms_country: values.hero_sms_country || '',
@@ -505,6 +506,7 @@ export default function App() {
             : await triggerTask({
                 ...shared,
                 mode: 'login',
+                forwarding_emails: values.forwarding_emails,
                 payment_link_type: values.payment_link_type,
                 payment_card: values.payment_card,
                 gc_ph_api_key: values.payment_link_type === 'gcash' ? values.gc_ph_api_key || '' : '',
@@ -656,7 +658,7 @@ export default function App() {
             extra={
               mode === 'register'
                 ? '支持单邮箱、Outlook 四字段、iCloud 两字段；多账号用换行或分号分隔'
-                : '格式：email----password----2fa；多账号用换行或分号分隔'
+                : '支持 email----password----2fa；或 Outlook/iCloud/网页取件（与注册相同，可再加 2FA）；多账号用换行或分号分隔'
             }
           >
             <TextArea
@@ -664,7 +666,7 @@ export default function App() {
               placeholder={
                 mode === 'register'
                   ? 'email@example.com\n或 email----password----client_id----refresh_token'
-                  : 'email----password----2fa'
+                  : 'email----password----2fa\n或 email----password----client_id----refresh_token----2fa'
               }
             />
           </Form.Item>
@@ -738,16 +740,18 @@ export default function App() {
             </>
           ) : null}
 
-          {mode === 'register' ? (
-            <Form.Item
-              label="转发邮箱"
-              name="forwarding_emails"
-              extra="单邮箱账号收验证邮件用"
-              rules={[{ required: true, message: '请选择转发邮箱' }]}
-            >
-              <Select options={FORWARDING_EMAIL_OPTIONS} />
-            </Form.Item>
-          ) : null}
+          <Form.Item
+            label="转发邮箱"
+            name="forwarding_emails"
+            extra={
+              mode === 'register'
+                ? '单邮箱账号收验证邮件用'
+                : '无行内取件时，登录/绑定收邮箱验证码用（可选）'
+            }
+            rules={mode === 'register' ? [{ required: true, message: '请选择转发邮箱' }] : []}
+          >
+            <Select options={FORWARDING_EMAIL_OPTIONS} allowClear={mode !== 'register'} />
+          </Form.Item>
 
           <Space size="large" wrap className="switches">
             {mode === 'register' ? (

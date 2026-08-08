@@ -7,6 +7,12 @@ import type { TaskMode, TaskState } from '../_shared/types';
 const PROXY_REGIONS = new Set(['JP', 'PH']);
 const LOGIN_ACCOUNT_RE = /^\S+@\S+\.\S+$/;
 const BASE32_RE = /^[A-Z2-7=]+$/i;
+const BASE32_MIN_LEN = 10;
+
+function isBase32Field(value: string): boolean {
+  const compact = value.replace(/\s+/g, '');
+  return compact.length >= BASE32_MIN_LEN && BASE32_RE.test(compact);
+}
 
 interface TriggerBody {
   mode?: TaskMode;
@@ -49,16 +55,34 @@ function validateLoginAccounts(accounts: string, label: string): string | null {
   for (let index = 0; index < records.length; index++) {
     const fields = records[index].split(/-{4,}/).map((part) => part.trim()).filter(Boolean);
     if (fields.length < 3) {
-      return `第 ${index + 1} 个账号格式错误，须为 email----password----2fa`;
+      return `第 ${index + 1} 个账号格式错误，至少须为 email----password----2fa 或取件字段`;
     }
-    const [email, password, otp] = fields;
+    const [email, password] = fields;
     if (!LOGIN_ACCOUNT_RE.test(email)) {
       return `第 ${index + 1} 个账号邮箱格式无效`;
     }
     if (!password) return `第 ${index + 1} 个账号密码为空`;
-    if (!BASE32_RE.test(otp.replace(/\s+/g, ''))) {
-      return `第 ${index + 1} 个账号 2FA 密钥应为 Base32`;
+
+    if (fields.length >= 5) {
+      if (isBase32Field(fields[2])) continue;
+      if (!isBase32Field(fields[4])) {
+        return `第 ${index + 1} 个账号第五段应为 Base32 2FA 密钥`;
+      }
+      continue;
     }
+    if (fields.length === 4) {
+      const third = fields[2];
+      const fourth = fields[3];
+      if (isBase32Field(third)) continue;
+      if (isBase32Field(fourth)) continue;
+      if (!fields[2] || !fields[3]) {
+        return `第 ${index + 1} 个账号 Outlook 取件须为 client_id 与 refresh_token`;
+      }
+      continue;
+    }
+    const third = fields[2];
+    if (isBase32Field(third)) continue;
+    if (!third) return `第 ${index + 1} 个账号取件字段为空`;
   }
   return null;
 }
@@ -178,8 +202,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     inputs.hero_sms_country = heroSmsCountry;
   }
 
-  if (mode === 'register') {
+  if (mode === 'register' || mode === 'login' || mode === 'bind_phone') {
     inputs.forwarding_emails = (body.forwarding_emails || '').trim();
+  }
+
+  if (mode === 'register') {
     inputs.enable_mfa = String(body.enable_mfa !== false);
   }
 

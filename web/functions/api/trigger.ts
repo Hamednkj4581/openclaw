@@ -4,12 +4,17 @@ import { commitMessage, dispatchWorkflow } from '../_shared/github';
 import { writeTask } from '../_shared/tasks';
 import type { TaskMode, TaskState } from '../_shared/types';
 
+const PROXY_REGIONS = new Set(['JP', 'PH']);
+
 interface TriggerBody {
   mode?: TaskMode;
   accounts?: string;
   forwarding_emails?: string;
   enable_mfa?: boolean;
   enable_711_proxy?: boolean;
+  proxy_region?: string;
+  proxy_username?: string;
+  proxy_password?: string;
   payment_link_type?: string;
   payment_card?: string;
   hold_minutes?: number | string;
@@ -46,6 +51,21 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return friendlyError(400, '选择 gcash 时请填写卡密');
   }
 
+  const proxyRegionRaw = (body.proxy_region || '').trim().toUpperCase();
+  const enableProxy =
+    body.enable_711_proxy === true || (proxyRegionRaw !== '' && proxyRegionRaw !== 'NONE');
+  const proxyRegion = enableProxy ? proxyRegionRaw : '';
+  const proxyUsername = (body.proxy_username || '').trim();
+  const proxyPassword = (body.proxy_password || '').trim();
+  if (enableProxy) {
+    if (!PROXY_REGIONS.has(proxyRegion)) {
+      return friendlyError(400, '请选择有效的代理地区');
+    }
+    if (!proxyUsername || !proxyPassword) {
+      return friendlyError(400, '启用代理时请填写代理账号和密码');
+    }
+  }
+
   const taskId = crypto.randomUUID();
   const state: TaskState = {
     mode,
@@ -65,7 +85,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     commit_message: commitMessage(mode),
     accounts,
     web_task_id: taskId,
-    enable_711_proxy: String(Boolean(body.enable_711_proxy)),
+    enable_711_proxy: String(enableProxy),
+    proxy_region: proxyRegion,
+    proxy_username: enableProxy ? proxyUsername : '',
+    proxy_password: enableProxy ? proxyPassword : '',
     payment_link_type: paymentLinkType,
     payment_card: paymentLinkType === 'gcash' ? paymentCard : '',
     hold_minutes: holdMinutes,

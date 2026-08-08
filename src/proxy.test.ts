@@ -32,6 +32,15 @@ test('buildJapanStickyProxy creates JP sticky username with fresh session', () =
     assert.notEqual(a.session, b.session);
 });
 
+test('buildJapanStickyProxy creates PH sticky username with fresh session', () => {
+    process.env.PROXY_USERNAME = 'testuser';
+    process.env.PROXY_PASSWORD = 'testpass';
+    process.env.PROXY_REGION = 'PH';
+    const proxy = buildJapanStickyProxy();
+    assert.equal(proxy.region, 'PH');
+    assert.match(proxy.username, /^testuser-zone-custom-region-PH-session-\d{8}-sessTime-30$/);
+});
+
 test('buildJapanStickyProxy requires credentials', () => {
     delete process.env.PROXY_USERNAME;
     delete process.env.PROXY_PASSWORD;

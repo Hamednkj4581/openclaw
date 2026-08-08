@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Button,
@@ -27,7 +27,47 @@ const FORWARDING_EMAIL_OPTIONS = [{ value: 'TimmothyBegan9059@hotmail.com', labe
 const PROXY_REGION_OPTIONS = [
   { value: 'none', label: '直连（不使用代理）' },
   { value: 'JP', label: '日本' },
+  { value: 'PH', label: '菲律宾' },
 ];
+
+const PROXY_STORAGE_KEY = 'gpt-web-console.proxy.v1';
+
+type ProxyCreds = { username: string; password: string };
+type ProxyStore = {
+  region: string;
+  credentials: Record<string, ProxyCreds>;
+};
+
+function readProxyStore(): ProxyStore {
+  try {
+    const raw = localStorage.getItem(PROXY_STORAGE_KEY);
+    if (!raw) return { region: 'JP', credentials: {} };
+    const parsed = JSON.parse(raw) as ProxyStore;
+    if (!parsed || typeof parsed !== 'object') return { region: 'JP', credentials: {} };
+    return {
+      region: typeof parsed.region === 'string' && parsed.region ? parsed.region : 'JP',
+      credentials:
+        parsed.credentials && typeof parsed.credentials === 'object' ? parsed.credentials : {},
+    };
+  } catch {
+    return { region: 'JP', credentials: {} };
+  }
+}
+
+function writeProxyStore(store: ProxyStore): void {
+  localStorage.setItem(PROXY_STORAGE_KEY, JSON.stringify(store));
+}
+
+function saveProxyRegionCreds(region: string, username: string, password: string): void {
+  if (!region || region === 'none') return;
+  const store = readProxyStore();
+  store.region = region;
+  store.credentials[region] = {
+    username: username.trim(),
+    password: password,
+  };
+  writeProxyStore(store);
+}
 
 const HOLD_MINUTES_OPTIONS = [
   { value: 5, label: '5 分钟' },
@@ -47,6 +87,8 @@ interface TaskFormValues {
   forwarding_emails: string;
   enable_mfa: boolean;
   proxy_region: string;
+  proxy_username: string;
+  proxy_password: string;
   hold_minutes: number;
   payment_link_type: string;
   payment_card: string;
@@ -118,6 +160,27 @@ export default function App() {
   const [status, setStatus] = useState<TaskStatus | null>(null);
   const [form] = Form.useForm<TaskFormValues>();
   const paymentLinkType = Form.useWatch('payment_link_type', form);
+  const proxyRegion = Form.useWatch('proxy_region', form);
+  const proxyRegionRef = useRef(proxyRegion);
+
+  useEffect(() => {
+    proxyRegionRef.current = proxyRegion;
+  }, [proxyRegion]);
+
+  // 启动时恢复上次地区与对应代理凭据
+  useEffect(() => {
+    const store = readProxyStore();
+    const region = PROXY_REGION_OPTIONS.some((item) => item.value === store.region)
+      ? store.region
+      : 'JP';
+    const creds = store.credentials[region] || { username: '', password: '' };
+    form.setFieldsValue({
+      proxy_region: region,
+      proxy_username: creds.username || '',
+      proxy_password: creds.password || '',
+    });
+    proxyRegionRef.current = region;
+  }, [form]);
 
   useEffect(() => {
     if (!taskId) return;
@@ -160,9 +223,19 @@ export default function App() {
   const onSubmit = async (values: TaskFormValues) => {
     setSubmitting(true);
     try {
+      if (isProxyEnabled(values.proxy_region)) {
+        saveProxyRegionCreds(values.proxy_region, values.proxy_username, values.proxy_password);
+      } else {
+        const store = readProxyStore();
+        store.region = 'none';
+        writeProxyStore(store);
+      }
       const shared = {
         accounts: values.accounts,
         enable_711_proxy: isProxyEnabled(values.proxy_region),
+        proxy_region: isProxyEnabled(values.proxy_region) ? values.proxy_region : '',
+        proxy_username: isProxyEnabled(values.proxy_region) ? values.proxy_username.trim() : '',
+        proxy_password: isProxyEnabled(values.proxy_region) ? values.proxy_password : '',
         payment_link_type: values.payment_link_type,
         payment_card: values.payment_card,
         hold_minutes: Number(values.hold_minutes) || 15,
@@ -224,6 +297,8 @@ export default function App() {
             forwarding_emails: FORWARDING_EMAIL_OPTIONS[0].value,
             enable_mfa: true,
             proxy_region: 'JP',
+            proxy_username: '',
+            proxy_password: '',
             hold_minutes: 15,
             payment_link_type: '未选择',
             payment_card: '',
@@ -271,9 +346,74 @@ export default function App() {
               <Select style={{ width: 140 }} options={HOLD_MINUTES_OPTIONS} />
             </Form.Item>
             <Form.Item label="代理地区" name="proxy_region" rules={[{ required: true, message: '请选择代理地区' }]}>
-              <Select style={{ width: 200 }} options={PROXY_REGION_OPTIONS} />
+              <Select
+                style={{ width: 200 }}
+                options={PROXY_REGION_OPTIONS}
+                onChange={(nextRegion) => {
+                  const current = form.getFieldsValue();
+                  const prevRegion = proxyRegionRef.current;
+                  if (prevRegion && prevRegion !== 'none') {
+                    saveProxyRegionCreds(prevRegion, current.proxy_username || '', current.proxy_password || '');
+                  }
+                  if (!nextRegion || nextRegion === 'none') {
+                    form.setFieldsValue({ proxy_username: '', proxy_password: '' });
+                    const store = readProxyStore();
+                    store.region = 'none';
+                    writeProxyStore(store);
+                    proxyRegionRef.current = 'none';
+                    return;
+                  }
+                  const store = readProxyStore();
+                  store.region = nextRegion;
+                  writeProxyStore(store);
+                  const creds = store.credentials[nextRegion] || { username: '', password: '' };
+                  form.setFieldsValue({
+                    proxy_username: creds.username || '',
+                    proxy_password: creds.password || '',
+                  });
+                  proxyRegionRef.current = nextRegion;
+                }}
+              />
             </Form.Item>
           </Space>
+
+          {isProxyEnabled(proxyRegion) ? (
+            <>
+              <Form.Item
+                label="代理账号"
+                name="proxy_username"
+                rules={[{ required: true, message: '请填写代理账号' }]}
+                extra="按地区保存在本浏览器，切换地区会自动切换账号"
+              >
+                <Input
+                  placeholder="711Proxy 用户名"
+                  autoComplete="off"
+                  onBlur={() => {
+                    const values = form.getFieldsValue();
+                    if (isProxyEnabled(values.proxy_region)) {
+                      saveProxyRegionCreds(values.proxy_region, values.proxy_username || '', values.proxy_password || '');
+                    }
+                  }}
+                />
+              </Form.Item>
+              <Form.Item
+                label="代理密码"
+                name="proxy_password"
+                rules={[{ required: true, message: '请填写代理密码' }]}
+              >
+                <Input.Password
+                  placeholder="711Proxy 密码"
+                  autoComplete="off"
+                  onBlur={() => {
+                    const values = form.getFieldsValue();
+                    if (isProxyEnabled(values.proxy_region)) {
+                      saveProxyRegionCreds(values.proxy_region, values.proxy_username || '', values.proxy_password || '');
+                    }
+                  }}
+                />
+              </Form.Item>
+            </>
+          ) : null}
 
           <Form.Item label="支付提链" name="payment_link_type">
             <Select

@@ -27,10 +27,25 @@ on:
         default: true
         type: boolean
       enable_711_proxy:
-        description: '启用 711Proxy 日本住宅代理'
+        description: '启用 711Proxy 住宅代理'
         required: false
         default: false
         type: boolean
+      proxy_region:
+        description: '代理地区码（JP/PH 等）'
+        required: false
+        default: ''
+        type: string
+      proxy_username:
+        description: '711Proxy 账号'
+        required: false
+        default: ''
+        type: string
+      proxy_password:
+        description: '711Proxy 密码'
+        required: false
+        default: ''
+        type: string
       hold_minutes:
         description: '成功后保持分钟数'
         required: false
@@ -211,11 +226,11 @@ jobs:
           WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
           WEB_ACCOUNT_INDEX: ${{ matrix.account_index }}
           CAPSOLVER_API_KEY: ${{ secrets.CAPSOLVER_API_KEY }}
-          PROXY_USERNAME: ${{ secrets.PROXY_USERNAME }}
-          PROXY_PASSWORD: ${{ secrets.PROXY_PASSWORD }}
+          PROXY_USERNAME: ${{ inputs.proxy_username }}
+          PROXY_PASSWORD: ${{ inputs.proxy_password }}
           PROXY_HOST: us.rotgb.711proxy.com
           PROXY_PORT: '10000'
-          PROXY_REGION: JP
+          PROXY_REGION: ${{ inputs.proxy_region }}
           PROXY_SESS_TIME: '30'
           ACCOUNT_RESULT_PATH: step-summary
           ACCOUNT_SESSION_JSON_PATH: session.json
@@ -226,6 +241,9 @@ jobs:
           npm install
           hold="${{ inputs.hold_minutes }}"
           mode="${{ inputs.mode }}"
+          # 掩码客户端传入的代理凭据，避免出现在日志
+          if [ -n "${PROXY_USERNAME}" ]; then echo "::add-mask::${PROXY_USERNAME}"; fi
+          if [ -n "${PROXY_PASSWORD}" ]; then echo "::add-mask::${PROXY_PASSWORD}"; fi
           # gcash 单账号提链最多约 10 分钟，额外预留
           extra=0
           if [ "${{ inputs.payment_link_type }}" = "gcash" ]; then extra=10; fi

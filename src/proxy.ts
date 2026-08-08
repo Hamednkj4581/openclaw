@@ -31,16 +31,16 @@ export function pacRouteForUrl(url: string): 'DIRECT' | 'PROXY' {
     return STATIC_ASSET_URL_RE.test(url) ? 'DIRECT' : 'PROXY';
 }
 
-/** 构建 711Proxy 日本住宅 Sticky 代理：每次调用生成新 session，IP 与计时均重新开始 */
+/** 构建 711Proxy 住宅 Sticky 代理：每次调用生成新 session，出口国家由 PROXY_REGION 决定 */
 export function buildJapanStickyProxy(): ProxyConfig {
     const baseUser = process.env.PROXY_USERNAME?.trim();
     const password = process.env.PROXY_PASSWORD?.trim();
     if (!baseUser || !password) throw new Error('缺少 PROXY_USERNAME / PROXY_PASSWORD');
 
-    // rotgb = Residential GB；region-JP 决定出口国家，与 gateway 主机无关
+    // rotgb = Residential GB；region-XX 决定出口国家，与 gateway 主机无关
     const host = (process.env.PROXY_HOST ?? 'us.rotgb.711proxy.com').trim();
     const port = Number(process.env.PROXY_PORT ?? 10000);
-    const region = (process.env.PROXY_REGION ?? 'JP').trim().toUpperCase();
+    const region = (process.env.PROXY_REGION ?? 'JP').trim().toUpperCase() || 'JP';
     const sessTime = Math.min(180, Math.max(5, Number(process.env.PROXY_SESS_TIME ?? 30)));
     // 8 位数字 session：相同值复用同一 IP；新值分配新 IP 并重新计时
     const session = String(randomInt(10_000_000, 100_000_000));
@@ -57,8 +57,8 @@ export function rotateStickySession(proxy: ProxyConfig): void {
 }
 
 /**
- * 生成 PAC：图片/字体/JS/CSS 等静态资源直连本机网络，其余（HTML/XHR 等）走日本代理。
- * 注册只需出口 IP 像日本；静态资源不校验地理，直连可省住宅流量。
+ * 生成 PAC：图片/字体/JS/CSS 等静态资源直连本机网络，其余（HTML/XHR 等）走住宅代理。
+ * 注册只需出口 IP 像目标地区；静态资源不校验地理，直连可省住宅流量。
  */
 export function buildProxyPacUrl(proxy: Pick<ProxyConfig, 'host' | 'port'>): string {
     const pac = [

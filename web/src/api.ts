@@ -6,6 +6,9 @@ export interface TriggerPayload {
   forwarding_emails?: string;
   enable_mfa?: boolean;
   enable_711_proxy?: boolean;
+  proxy_region?: string;
+  proxy_username?: string;
+  proxy_password?: string;
   payment_link_type?: string;
   payment_card?: string;
   hold_minutes?: number;

@@ -12,10 +12,25 @@ on:
         required: true
         type: string
       enable_711_proxy:
-        description: '启用 711Proxy 日本住宅代理（关闭则直连）'
+        description: '启用 711Proxy 住宅代理（关闭则直连）'
         required: false
         default: false
         type: boolean
+      proxy_region:
+        description: '代理地区码（如 JP/PH；启用代理时必填）'
+        required: false
+        default: ''
+        type: string
+      proxy_username:
+        description: '711Proxy 账号（启用代理时由客户端填写）'
+        required: false
+        default: ''
+        type: string
+      proxy_password:
+        description: '711Proxy 密码（启用代理时由客户端填写）'
+        required: false
+        default: ''
+        type: string
       hold_minutes:
         description: '成功后保持分钟数（先回传 token，再等待关闭）'
         required: false
@@ -59,6 +74,9 @@ jobs:
       commit_message: ${{ inputs.commit_message }}
       accounts: ${{ inputs.accounts }}
       enable_711_proxy: ${{ inputs.enable_711_proxy }}
+      proxy_region: ${{ inputs.proxy_region }}
+      proxy_username: ${{ inputs.proxy_username }}
+      proxy_password: ${{ inputs.proxy_password }}
       hold_minutes: ${{ inputs.hold_minutes }}
       payment_link_type: ${{ inputs.payment_link_type }}
       payment_card: ${{ inputs.payment_card }}

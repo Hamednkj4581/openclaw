@@ -8,13 +8,15 @@ export type ProxyAuth = { username: string; password: string };
 
 export type PaymentQrCapture = {
     /** 页面内二维码图片 data URL（data:image/...;base64,...） */
-    dataUrl: string;
+    dataUrl?: string;
+    /** 取码失败原因（供网页端展示） */
+    error?: string;
 };
 
 /**
  * 用当前浏览器新开标签打开提链页，读取 #qrcode img 的 data URL 图片。
  * 取码成功后故意不关支付页，避免服务端判定会话失效导致扫码无效；
- * 页面随延迟关闭结束时浏览器一起退出。失败只告警并返回 undefined。
+ * 页面随延迟关闭结束时浏览器一起退出。失败返回 error，不影响主流程。
  */
 export async function capturePaymentQr(
     browser: Browser,
@@ -59,8 +61,9 @@ export async function capturePaymentQr(
         return { dataUrl };
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        logger.warn('提取支付二维码失败（不影响主流程）：%s', message);
-        return undefined;
+        const tip = `提取支付二维码失败：${message}`.slice(0, 160);
+        logger.warn('%s（不影响主流程）', tip);
+        return { error: tip };
     } finally {
         if (!keepOpen) {
             await page.close().catch(() => undefined);

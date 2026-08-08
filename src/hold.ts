@@ -129,17 +129,19 @@ export async function notifyWebAccountSuccess(
     });
 }
 
-/** 账号已成功后补传支付链接与页面内二维码图片 */
+/** 账号已成功后补传支付链接与页面内二维码图片（取码失败时可附带 paymentError） */
 export async function notifyWebPaymentLink(
     email: string,
     paymentLink: string,
     paymentQr?: string,
+    paymentError?: string,
 ): Promise<void> {
     const config = webCallbackConfig();
     if (!config) return;
     const link = paymentLink.trim();
     if (!link) return;
     const qr = paymentQr?.trim();
+    const tip = paymentError?.trim().slice(0, WEB_PROGRESS_MAX);
     await postWebCallback({
         event: 'account_done',
         account: {
@@ -148,6 +150,7 @@ export async function notifyWebPaymentLink(
             ok: true,
             paymentLink: link,
             ...(qr ? { paymentQr: qr } : {}),
+            ...(tip ? { paymentError: tip } : {}),
         },
     });
 }
@@ -183,15 +186,18 @@ export async function finishAccountSuccess(
             const captured = await capturePaymentQr(browser, paymentLink, proxyAuth);
             paymentQr = captured?.dataUrl;
             if (!paymentQr) {
-                paymentError = '支付链接已就绪，但二维码图片获取失败';
+                paymentError = captured?.error?.trim()
+                    || '支付链接已就绪，但二维码图片获取失败';
                 logger.warn(paymentError);
                 await notifyWebProgress(paymentError, email).catch(() => undefined);
             }
         } else {
             paymentError = '提链成功但无浏览器实例，跳过二维码提取';
             logger.warn(paymentError);
+            await notifyWebProgress(paymentError, email).catch(() => undefined);
         }
-        await notifyWebPaymentLink(email, paymentLink, paymentQr);
+        // 取码失败时立刻回传 paymentError，网页端能马上看到原因（不仅靠进度文案）
+        await notifyWebPaymentLink(email, paymentLink, paymentQr, paymentQr ? undefined : paymentError);
     } else if (paymentError) {
         logger.info('提链未完成：%s', paymentError);
     } else {

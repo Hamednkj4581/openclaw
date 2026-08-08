@@ -57,15 +57,16 @@ export async function notifyWebProgress(message: string, email?: string): Promis
     });
 }
 
-/** 成功后回传 access token（可附带支付链接） */
+/** 成功后回传 access token（可附带支付链接；holdUntil 可选，提链完成后再传） */
 export async function notifyWebAccountSuccess(
     email: string,
     accessToken: string,
-    holdUntil: number,
-    paymentLink?: string
+    options?: { holdUntil?: number; paymentLink?: string }
 ): Promise<void> {
     const config = webCallbackConfig();
     if (!config) return;
+    const holdUntil = options?.holdUntil;
+    const paymentLink = options?.paymentLink?.trim();
     await postWebCallback({
         event: 'account_done',
         account: {
@@ -73,7 +74,7 @@ export async function notifyWebAccountSuccess(
             email,
             ok: true,
             accessToken,
-            holdUntil,
+            ...(typeof holdUntil === 'number' && holdUntil > 0 ? { holdUntil } : {}),
             ...(paymentLink ? { paymentLink } : {}),
         },
     });
@@ -97,19 +98,26 @@ export async function notifyWebPaymentLink(email: string, paymentLink: string): 
 }
 
 /**
- * 先回传 token，再按需单账号提链并回传 URL，最后进入保持等待。
+ * 顺序：回传 token → 提链（浏览器仍打开）→ 再开始保持等待关闭。
+ * 提链不得占用保持时长。
  */
 export async function finishAccountSuccess(email: string, accessToken: string): Promise<void> {
-    const holdMinutes = resolveHoldMinutes();
-    const holdUntil = Date.now() + holdMinutes * 60 * 1000;
-    await notifyWebAccountSuccess(email, accessToken, holdUntil);
+    // 先回传 token，此时尚未进入保持倒计时
+    await notifyWebAccountSuccess(email, accessToken);
 
     const paymentLink = await extractAccountPaymentLink(accessToken, (message) => notifyWebProgress(message, email));
     if (paymentLink) {
         await notifyWebPaymentLink(email, paymentLink);
     }
 
-    await notifyWebProgress(`已完成，将保持约 ${holdMinutes} 分钟…`, email);
+    // 提链完成后再开始「等待关闭」
+    const holdMinutes = resolveHoldMinutes();
+    const holdUntil = Date.now() + holdMinutes * 60 * 1000;
+    await notifyWebAccountSuccess(email, accessToken, {
+        holdUntil,
+        ...(paymentLink ? { paymentLink } : {}),
+    });
+    await notifyWebProgress(`将保持约 ${holdMinutes} 分钟后关闭…`, email);
     await waitHoldMinutes(holdMinutes, holdUntil);
 }
 

@@ -1,11 +1,14 @@
 import unittest
 
 from account_input import (
+    apply_account_mail_env,
+    is_login_totp_record,
     parse_accounts,
     parse_email_list,
     parse_login_accounts,
     parse_outlook_mailboxes,
     resolve_forward_mailbox,
+    split_record_fields,
 )
 
 
@@ -76,26 +79,16 @@ class ForwardMailboxTest(unittest.TestCase):
 
 
 class ParseLoginAccountsTest(unittest.TestCase):
+    def test_login_totp_record_detection(self) -> None:
+        fields = split_record_fields(
+            "user@example.com----Pass----AJYTL5F5HRHUTOWA2ESYBJOKC2FBSRLD"
+        )
+        self.assertTrue(is_login_totp_record(fields))
+
     def test_parses_totp_only(self) -> None:
         rows = parse_login_accounts("user@example.com----Pass----AJYTL5F5HRHUTOWA2ESYBJOKC2FBSRLD")
         self.assertEqual(rows[0].otp_secret, "AJYTL5F5HRHUTOWA2ESYBJOKC2FBSRLD")
-        self.assertFalse(rows[0].has_inline_mail)
-
-    def test_parses_outlook_pickup_with_totp(self) -> None:
-        rows = parse_login_accounts(
-            "user@example.com----Pass----client----refresh----AJYTL5F5HRHUTOWA2ESYBJOKC2FBSRLD"
-        )
-        self.assertEqual(rows[0].client_id, "client")
-        self.assertEqual(rows[0].refresh_token, "refresh")
-        self.assertTrue(rows[0].has_inline_mail)
-
-    def test_parses_webmail_and_totp(self) -> None:
-        rows = parse_login_accounts(
-            "user@example.com----Pass----https://mail.example/x----AJYTL5F5HRHUTOWA2ESYBJOKC2FBSRLD"
-        )
-        self.assertEqual(rows[0].webmail_url, "https://mail.example/x")
-        self.assertEqual(rows[0].otp_secret, "AJYTL5F5HRHUTOWA2ESYBJOKC2FBSRLD")
-
+        self.assertIsNone(rows[0].register_fields)
 
     def test_parses_register_style_two_field_webmail(self) -> None:
         line = (
@@ -103,15 +96,18 @@ class ParseLoginAccountsTest(unittest.TestCase):
             "https://mail.ai1998.xyz/messages/DIX717FVCimDYKhhCTr7J0YnfCN03prT/voltage.horsey6z%40icloud.com"
         )
         row = parse_login_accounts(line)[0]
-        self.assertEqual(row.email, "voltage.hor222y6z@icloud.com")
-        self.assertEqual(row.password, "")
-        self.assertTrue(row.webmail_url)
+        self.assertEqual(row.register_fields, split_record_fields(line))
         self.assertTrue(row.has_inline_mail)
 
-    def test_parses_single_email(self) -> None:
+    def test_parses_single_email_via_parse_accounts(self) -> None:
         row = parse_login_accounts("alias@example.com")[0]
-        self.assertEqual(row.email, "alias@example.com")
+        self.assertEqual(row.register_fields, ["alias@example.com"])
         self.assertFalse(row.has_inline_mail)
+
+    def test_outlook_four_fields_use_parse_accounts(self) -> None:
+        line = "outlook@example.com----password----client-id----refresh-token"
+        row = parse_login_accounts(line)[0]
+        self.assertEqual(row.register_fields, parse_accounts(line)[0])
 
 
 if __name__ == "__main__":

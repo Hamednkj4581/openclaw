@@ -48,7 +48,7 @@ function parseProxyLinks(value: string): string[] {
     .filter(Boolean);
 }
 
-/** 提交前校验登录/绑定手机账号格式，任一错误整单拒绝 */
+/** 提交前校验登录/绑定手机：注册格式 + 额外 email----password----2fa */
 function validateLoginAccounts(accounts: string, label: string): string | null {
   const records = accounts.split(/(?:\r?\n|;)+/).map((item) => item.trim()).filter(Boolean);
   if (!records.length) return `请填写${label}账号`;
@@ -58,32 +58,22 @@ function validateLoginAccounts(accounts: string, label: string): string | null {
     if (!LOGIN_ACCOUNT_RE.test(fields[0])) {
       return `第 ${index + 1} 个账号邮箱格式无效`;
     }
+    if (fields.length >= 3 && isBase32Field(fields[2])) {
+      if (!fields[1]) return `第 ${index + 1} 个账号密码为空`;
+      continue;
+    }
     if (fields.length === 1) continue;
     if (fields.length === 2) {
       if (!fields[1]) return `第 ${index + 1} 个取件字段为空`;
       continue;
     }
     if (fields.length === 4) {
-      const third = fields[2];
-      const fourth = fields[3];
-      if (isBase32Field(third) || isBase32Field(fourth)) continue;
-      if (!fields[1] || !third || !fourth) {
-        return `第 ${index + 1} 个 Outlook 取件四字段不完整`;
+      if (fields.some((field) => !field)) {
+        return `第 ${index + 1} 个 Outlook 四字段不完整`;
       }
       continue;
     }
-    if (fields.length < 3) return `第 ${index + 1} 个账号格式错误`;
-    if (!fields[1]) return `第 ${index + 1} 个账号密码为空`;
-    if (fields.length >= 5) {
-      if (isBase32Field(fields[2])) continue;
-      if (!isBase32Field(fields[4])) {
-        return `第 ${index + 1} 个账号第五段应为 Base32 2FA 密钥`;
-      }
-      continue;
-    }
-    const third = fields[2];
-    if (isBase32Field(third)) continue;
-    if (!third) return `第 ${index + 1} 个账号取件字段为空`;
+    return `第 ${index + 1} 个账号格式错误（与注册相同：单邮箱 / 两字段取件 / Outlook 四字段，或 email----password----2fa）`;
   }
   return null;
 }

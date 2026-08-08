@@ -656,16 +656,16 @@ export default function App() {
             name="accounts"
             rules={[{ required: true, message: '请填写账号' }]}
             extra={
-              mode === 'register' || mode === 'login' || mode === 'bind_phone'
-                ? '与注册相同：单邮箱、email----取件链接、Outlook 四字段；登录/绑定还可加 email----password----2fa'
-                : undefined
+              mode === 'register'
+                ? '单邮箱、email----取件链接、Outlook 四字段；多账号用换行或分号分隔'
+                : '与注册相同，另支持 email----password----2fa'
             }
           >
             <TextArea
               rows={6}
               placeholder={
                 mode === 'register'
-                  ? 'email@example.com\n或 email----password----client_id----refresh_token'
+                  ? 'email@example.com\n或 email----取件链接'
                   : 'email----取件链接\n或 email----password----2fa'
               }
             />

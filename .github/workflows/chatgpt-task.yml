@@ -126,6 +126,7 @@ jobs:
 
           sys.path.insert(0, '.github/scripts')
           from account_input import (
+              apply_account_mail_env,
               apply_login_account_env,
               FIELD_SEPARATOR,
               parse_accounts,
@@ -141,8 +142,8 @@ jobs:
                   accounts = parse_login_accounts(os.environ['ACCOUNTS'])
                   raw_records = split_account_records(os.environ['ACCOUNTS'])
                   needs_forward = any(
-                      len([f for f in FIELD_SEPARATOR.split(r) if f.strip()]) == 1
-                      for r in raw_records
+                      acc.register_fields is not None and len(acc.register_fields) == 1
+                      for acc in accounts
                   )
                   forwarding = (
                       parse_email_list(os.environ.get('FORWARDING_EMAILS', ''))
@@ -221,6 +222,7 @@ jobs:
 
           sys.path.insert(0, '.github/scripts')
           from account_input import (
+              apply_account_mail_env,
               apply_login_account_env,
               parse_accounts,
               parse_email_list,
@@ -240,7 +242,8 @@ jobs:
                       if (os.environ.get('FORWARDING_EMAILS') or '').strip()
                       else []
                   )
-                  print(f'::add-mask::{record.password}')
+                  if record.chatgpt_password:
+                      print(f'::add-mask::{record.chatgpt_password}')
                   apply_login_account_env(
                       env_file,
                       raw_records[index],
@@ -250,28 +253,17 @@ jobs:
                   )
               else:
                   fields = parse_accounts(os.environ['ACCOUNTS'])[index]
-                  if len(fields) == 1:
-                      forwarding = parse_email_list(os.environ.get('FORWARDING_EMAILS', ''))
-                      mailbox = resolve_forward_mailbox(forwarding, os.environ.get('FORWARD_MAILBOXES', ''))
-                      values = {
-                          'EMAIL': fields[0],
-                          'MAILBOX_EMAIL': mailbox[0],
-                          'EMAIL_PASSWORD': mailbox[1],
-                          'CLIENT_ID': mailbox[2],
-                          'REFRESH_TOKEN': mailbox[3],
-                      }
-                  elif len(fields) == 2:
-                      values = {'EMAIL': fields[0], 'ICLOUD_API_KEY': fields[1]}
-                  else:
-                      values = {
-                          'EMAIL': fields[0],
-                          'EMAIL_PASSWORD': fields[1],
-                          'CLIENT_ID': fields[2],
-                          'REFRESH_TOKEN': fields[3],
-                      }
-                  for name, value in values.items():
-                      print(f'::add-mask::{value}')
-                      env_file.write(f'{name}<<__ACCOUNT_VALUE__\n{value}\n__ACCOUNT_VALUE__\n')
+                  forwarding = (
+                      parse_email_list(os.environ.get('FORWARDING_EMAILS', ''))
+                      if (os.environ.get('FORWARDING_EMAILS') or '').strip()
+                      else []
+                  )
+                  values = apply_account_mail_env(
+                      env_file,
+                      fields,
+                      forwarding,
+                      os.environ.get('FORWARD_MAILBOXES', ''),
+                  )
                   env_file.write(f'ACCOUNT_EMAIL<<__EMAIL_VALUE__\n{values["EMAIL"]}\n__EMAIL_VALUE__\n')
 
       - name: 构建并运行

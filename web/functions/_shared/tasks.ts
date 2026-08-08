@@ -51,23 +51,7 @@ function placeholderAccount(index: number): AccountResult {
   };
 }
 
-/** 扫描已落 KV 的账号序号，避免 meta.total 偏小导致漏读 */
-async function listAccountIndices(env: Env, taskId: string): Promise<number[]> {
-  const prefix = accountKey(taskId, 0).replace(/:0$/, ':');
-  const indices: number[] = [];
-  let cursor: string | undefined;
-  do {
-    const page = await env.TASKS.list({ prefix, cursor });
-    for (const key of page.keys) {
-      const suffix = key.name.slice(prefix.length);
-      const index = Number(suffix);
-      if (Number.isInteger(index) && index >= 0) indices.push(index);
-    }
-    cursor = page.list_complete ? undefined : page.cursor;
-  } while (cursor);
-  return indices;
-}
-
+/** 按 total / 旧内嵌账号加载；不扫 KV list（Pages 上 list 会打崩 Worker → 回调 HTTP 500） */
 async function loadAccounts(
   env: Env,
   taskId: string,
@@ -79,8 +63,7 @@ async function loadAccounts(
     legacyByIndex.set(row.index, row);
   }
 
-  const kvIndices = await listAccountIndices(env, taskId);
-  const maxIndex = Math.max(total - 1, ...kvIndices, ...legacyByIndex.keys(), -1);
+  const maxIndex = Math.max(total - 1, ...legacyByIndex.keys(), -1);
   if (maxIndex < 0) return [];
 
   const indexes = Array.from({ length: maxIndex + 1 }, (_, i) => i);

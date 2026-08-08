@@ -42,7 +42,8 @@ async function postWebCallback(payload: Record<string, unknown>): Promise<void> 
             body: JSON.stringify({ taskId: config.taskId, ...payload }),
         });
         if (!response.ok) {
-            logger.warn('网页回调失败：HTTP %s', response.status);
+            const detail = await response.text().catch(() => '');
+            logger.warn('网页回调失败：HTTP %s%s', response.status, detail ? ` ${detail.slice(0, 120)}` : '');
         }
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

@@ -53,6 +53,7 @@ export function pickProxyLink(links: string[], accountIndex: number): { link: st
 /**
  * 解析单条代理链接，支持：
  * - http://user:pass@host:port
+ * - user:pass@host:port
  * - host:port:user:pass
  * - host:port
  */
@@ -78,6 +79,23 @@ export function parseProxyLink(raw: string, linkIndex = 0): ProxyConfig {
         port = url.port ? Number(url.port) : url.protocol === 'https:' ? 443 : 80;
         username = decodeURIComponent(url.username || '');
         password = decodeURIComponent(url.password || '');
+    } else if (text.includes('@')) {
+        // user:pass@host:port（711 等常见格式，用户名里可含大量连字符）
+        const at = text.lastIndexOf('@');
+        const userinfo = text.slice(0, at);
+        const hostPort = text.slice(at + 1).trim();
+        const userColon = userinfo.indexOf(':');
+        if (userColon <= 0 || !hostPort) {
+            throw new Error('代理链接格式应为 user:pass@host:port');
+        }
+        username = userinfo.slice(0, userColon);
+        password = userinfo.slice(userColon + 1);
+        const portColon = hostPort.lastIndexOf(':');
+        if (portColon <= 0) {
+            throw new Error('代理链接格式应为 user:pass@host:port');
+        }
+        host = hostPort.slice(0, portColon).trim();
+        port = Number(hostPort.slice(portColon + 1));
     } else {
         const parts = text.split(':');
         if (parts.length === 2) {
@@ -89,7 +107,7 @@ export function parseProxyLink(raw: string, linkIndex = 0): ProxyConfig {
             username = parts[2];
             password = parts.slice(3).join(':');
         } else {
-            throw new Error('代理链接格式应为 http://user:pass@host:port 或 host:port:user:pass');
+            throw new Error('代理链接格式应为 http://user:pass@host:port、user:pass@host:port 或 host:port:user:pass');
         }
     }
 

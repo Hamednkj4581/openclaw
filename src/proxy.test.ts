@@ -34,7 +34,7 @@ test('pickProxyLink round-robins by account index', () => {
     assert.deepEqual(pickProxyLink(links, 4), { link: 'p2', linkIndex: 1 });
 });
 
-test('parseProxyLink accepts URL and host:port:user:pass', () => {
+test('parseProxyLink accepts URL, user:pass@host:port and host:port:user:pass', () => {
     const a = parseProxyLink('http://user:pass@proxy.example:10000', 1);
     assert.equal(a.host, 'proxy.example');
     assert.equal(a.port, 10000);
@@ -47,6 +47,16 @@ test('parseProxyLink accepts URL and host:port:user:pass', () => {
     assert.equal(b.port, 10000);
     assert.equal(b.username, 'u');
     assert.equal(b.password, 'p:with:colon');
+
+    const c = parseProxyLink(
+        'jpuser001-zone-custom-region-JP-st-Aichi-session-57981956-sessTime-30-sessAuto-1:secret@global.rotgb.711proxy.com:10000',
+    );
+    assert.equal(c.host, 'global.rotgb.711proxy.com');
+    assert.equal(c.port, 10000);
+    assert.equal(c.username, 'jpuser001-zone-custom-region-JP-st-Aichi-session-57981956-sessTime-30-sessAuto-1');
+    assert.equal(c.password, 'secret');
+    assert.equal(c.session, '57981956');
+    assert.equal(c.sessTime, 30);
 });
 
 test('buildStickyProxyFromEnv assigns by WEB_ACCOUNT_INDEX', () => {

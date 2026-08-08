@@ -421,11 +421,11 @@ export default function App() {
               label="代理链接"
               name="proxy_links"
               rules={[{ required: true, message: '请填写至少一条代理链接' }]}
-              extra="每行一条；多账号按顺序轮询分配（例如 5 个账号、3 条链接 → 1,2,3,1,2）。支持 http://user:pass@host:port 或 host:port:user:pass"
+              extra="每行一条；多账号按顺序轮询分配（例如 5 个账号、3 条链接 → 1,2,3,1,2）。支持 user:pass@host:port、http://user:pass@host:port 或 host:port:user:pass"
             >
               <TextArea
                 rows={4}
-                placeholder={'http://user:pass@host:10000\nhost:10000:user:pass'}
+                placeholder={'user:pass@global.rotgb.711proxy.com:10000\nhttp://user:pass@host:10000'}
                 autoComplete="off"
                 onBlur={() => {
                   const values = form.getFieldsValue();

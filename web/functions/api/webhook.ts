@@ -4,7 +4,8 @@ import { readTask, writeTask } from '../_shared/tasks';
 
 interface WebhookBody {
   taskId?: string;
-  event?: 'started' | 'account_done' | 'finished';
+  event?: 'started' | 'progress' | 'account_done' | 'finished';
+  message?: string;
   total?: number;
   account?: {
     index?: number;
@@ -68,13 +69,28 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     const total = Number(body.total) || 0;
     state.total = total;
     state.phase = 'processing';
-    state.message = total > 0 ? `处理中（0/${total}）` : '处理中';
+    state.message = total > 0 ? `已开始处理（共 ${total} 个账号），请耐心等待…` : '已开始处理，请耐心等待…';
     if (total > 0 && state.accounts.length === 0) {
       state.accounts = Array.from({ length: total }, (_, index) => ({
         index,
         email: `账号 ${index + 1}`,
         ok: null,
+        hint: '排队中…',
       }));
+    }
+  } else if (body.event === 'progress') {
+    const tip = (body.message || '').trim().slice(0, 80);
+    if (!tip) return friendlyError(400, '进度文案无效');
+    state.phase = 'processing';
+    const index = Number(body.account?.index);
+    if (Number.isInteger(index) && index >= 0) {
+      const email = (body.account?.email || '').trim() || `账号 ${index + 1}`;
+      const row = ensureAccountSlot(state, index, email);
+      if (row.ok === null) row.hint = tip;
+      const total = state.total || state.accounts.length || 0;
+      state.message = total > 1 ? `账号 ${index + 1}/${total}：${tip}` : tip;
+    } else {
+      state.message = tip;
     }
   } else if (body.event === 'account_done') {
     const index = Number(body.account?.index);
@@ -82,6 +98,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     const email = (body.account?.email || '').trim() || `账号 ${index + 1}`;
     const row = ensureAccountSlot(state, index, email);
     row.ok = Boolean(body.account?.ok);
+    delete row.hint;
     if (row.ok && body.account?.accessToken) {
       row.accessToken = body.account.accessToken;
       delete row.error;
@@ -99,7 +116,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     if (!state.total) state.total = Math.max(state.accounts.length, index + 1);
     const doneCount = state.accounts.filter((a) => a.ok !== null).length;
     state.phase = 'processing';
-    state.message = `处理中（${doneCount}/${state.total || '?'}）`;
+    const pending = state.accounts.filter((a) => a.ok === null).length;
+    state.message =
+      pending > 0
+        ? `已完成 ${doneCount}/${state.total}，其余账号继续处理中…`
+        : `账号已全部处理完（${doneCount}/${state.total}），正在收尾…`;
   } else if (body.event === 'finished') {
     const links = normalizePaymentLinks(body.paymentLinks);
     if (links.length) {

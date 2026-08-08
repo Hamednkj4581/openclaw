@@ -28,6 +28,7 @@ export function publicStatus(state: TaskState) {
       ok: a.ok,
       accessToken: a.accessToken || undefined,
       error: a.error || undefined,
+      hint: a.hint || undefined,
       holdUntil: a.holdUntil || undefined,
     })),
     paymentLinks: state.paymentLinks?.length ? state.paymentLinks : undefined,

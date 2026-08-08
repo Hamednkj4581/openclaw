@@ -15,7 +15,7 @@ import { installNetworkCapture } from './networkCapture.js';
 import { buildJapanStickyProxy, buildProxyPacUrl, is711ProxyEnabled, preflightProxy, rotateStickySession } from './proxy.js';
 import { AUTHENTICATED_SELECTORS, CONTINUE_SELECTORS, LOGIN_SELECTORS, MFA_CHALLENGE_SELECTORS, MFA_CODE_SELECTORS, MFA_ENABLED_SELECTORS, MFA_VERIFY_SELECTORS, SIGNUP_EMAIL_SELECTORS, SIGNUP_SELECTORS } from './selectors.js';
 import { cookieFileNameForEmail, writeCookieEditorJson } from './cookieExport.js';
-import { notifyWebAccountSuccess, resolveHoldMinutes, waitHoldMinutes } from './hold.js';
+import { notifyWebAccountSuccess, notifyWebProgress, resolveHoldMinutes, waitHoldMinutes } from './hold.js';
 
 const MAX_TIMEOUT = Math.pow(2, 31) - 1;
 const EVIDENCE_TIMEOUT_MS = 15_000;
@@ -612,8 +612,10 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
         const credentials = credentialsFromEnv();
         const email = credentials.email;
         Object.values(credentials).forEach(value => typeof value === 'string' && sensitiveValues.add(value));
+        await notifyWebProgress('正在准备，请稍候…', email);
         await validateCapSolver();
         await preflightMail(credentials);
+        await notifyWebProgress('准备完成，正在打开服务…', email);
         const enable711Proxy = is711ProxyEnabled();
         const proxy = enable711Proxy ? buildJapanStickyProxy() : null;
         if (proxy) {
@@ -675,6 +677,7 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
             if (proxy) rotateStickySession(proxy);
         }
         await evidence(page, 'chatgpt-opened');
+        await notifyWebProgress('正在打开注册页面…', email);
         await solveCloudflareIfPresent(page);
         await evidence(page, 'initial-turnstile-checked');
         for (let retry = 0; ; retry++) {
@@ -697,6 +700,7 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
             }
         }
         await evidence(page, 'signup-opened');
+        await notifyWebProgress('正在填写账号信息…', email);
         await solveCloudflareIfPresent(page);
         await waitForEmailFormReady(page);
         await fillEmailInput(page, email);
@@ -718,11 +722,13 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
         }
         await evidence(page, `after-email-${state}`);
         if (state === 'password') {
+            await notifyWebProgress('正在设置登录密码…', email);
             await setPasswordIfPresent(page, chatGptPassword);
             state = await waitForState(page, ['email-verification', 'code', 'profile', 'authenticated']);
             await evidence(page, `after-password-${state}`);
         }
         if (state === 'email-verification' || state === 'code') {
+            await notifyWebProgress('正在验证邮箱，可能需要一两分钟…', email);
             logger.info('等待 ChatGPT 验证邮件');
             const verification = await waitForMailVerification(credentials, {
                 receivedAfter: registrationStartedAt,
@@ -759,11 +765,13 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
             await evidence(page, `after-verification-${state}`);
         }
         if (state === 'password') {
+            await notifyWebProgress('正在设置登录密码…', email);
             await setPasswordIfPresent(page, chatGptPassword);
             state = await waitForState(page, ['profile', 'authenticated']);
             await evidence(page, `after-post-verification-password-${state}`);
         }
         if (state === 'profile') {
+            await notifyWebProgress('正在完善个人资料…', email);
             await evidence(page, 'profile-form');
             await fillProfileIfPresent(page, email);
             state = await waitForState(page, ['authenticated'], 60_000);
@@ -774,6 +782,7 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
             throw new Error(`注册流程未进入已登录 ChatGPT 状态，当前状态：${state}，URL：${page.url().replace(/[?#].*$/, '')}`);
         }
         await evidence(page, 'authenticated');
+        await notifyWebProgress('注册即将完成，正在保存结果…', email);
         // 先导出 session/cookie：2FA 开启失败不得影响注册成功后的产物
         const session = await extractSessionExport(page);
         sensitiveValues.add(session.accessToken);
@@ -785,6 +794,7 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
         let otpSecret: string | undefined;
         if (enableChatGptMfa) {
             try {
+                await notifyWebProgress('正在开启两步验证…', email);
                 otpSecret = await enableMfa(page, evidence);
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
@@ -801,6 +811,7 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
 
         const holdMinutes = resolveHoldMinutes();
         const holdUntil = Date.now() + holdMinutes * 60 * 1000;
+        await notifyWebProgress(`已完成，将保持约 ${holdMinutes} 分钟…`, email);
         await notifyWebAccountSuccess(email, session.accessToken, holdUntil);
         await waitHoldMinutes(holdMinutes, holdUntil);
     } catch (error) {

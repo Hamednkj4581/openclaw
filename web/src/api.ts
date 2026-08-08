@@ -17,6 +17,7 @@ export interface AccountStatus {
   ok: boolean | null;
   accessToken?: string;
   error?: string;
+  hint?: string;
   holdUntil?: number;
 }
 

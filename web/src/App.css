@@ -45,9 +45,21 @@
 }
 
 .status-panel .status-message {
-  margin-bottom: 12px !important;
+  margin-bottom: 8px !important;
   color: var(--ink) !important;
   font-size: 15px;
+}
+
+.status-panel .status-tip {
+  margin-bottom: 12px !important;
+  color: var(--muted) !important;
+  font-size: 13px;
+}
+
+.account-hint {
+  margin: -2px 0 10px !important;
+  color: var(--muted) !important;
+  font-size: 13px;
 }
 
 .account-list {

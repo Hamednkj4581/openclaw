@@ -83,6 +83,26 @@ function AccountHoldCountdown({ holdUntil }: { holdUntil?: number }) {
   return <div className="hold-countdown">保持中，剩余 {label}</div>;
 }
 
+/** 等待期间轮换的友好提示（不含技术细节） */
+const WAITING_TIPS = [
+  '处理时间可能较长，请耐心等待',
+  '正在安全处理中，请勿关闭本页面',
+  '仍在进行，马上就好',
+  '账号较多或网络较慢时会多等一会儿',
+  '完成后结果会自动显示在下方',
+];
+
+function useWaitingTip(active: boolean): string | null {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    const timer = window.setInterval(() => setTick((n) => n + 1), 8000);
+    return () => window.clearInterval(timer);
+  }, [active]);
+  if (!active) return null;
+  return WAITING_TIPS[tick % WAITING_TIPS.length];
+}
+
 const phasePercent: Record<TaskStatus['phase'], number> = {
   submitted: 8,
   processing: 55,
@@ -132,6 +152,9 @@ export default function App() {
     }
     return phasePercent[status.phase];
   }, [status]);
+
+  const waiting = Boolean(taskId && (!status || !status.done));
+  const waitingTip = useWaitingTip(waiting);
 
   const onSubmit = async (values: TaskFormValues) => {
     setSubmitting(true);
@@ -274,7 +297,8 @@ export default function App() {
 
       {taskId && (
         <Card className="panel status-panel" bordered={false} title="处理进度">
-          <Paragraph className="status-message">{status?.message || '已提交，等待开始处理'}</Paragraph>
+          <Paragraph className="status-message">{status?.message || '已提交，正在启动任务，请稍候…'}</Paragraph>
+          {waitingTip ? <Paragraph className="status-tip">{waitingTip}</Paragraph> : null}
           <Progress
             percent={progress}
             status={status?.phase === 'failed' ? 'exception' : status?.done ? 'success' : 'active'}
@@ -288,9 +312,12 @@ export default function App() {
                   <div className="account-meta">
                     <Text strong>{account.email}</Text>
                     <Text type={account.ok === true ? 'success' : account.ok === false ? 'danger' : 'secondary'}>
-                      {account.ok === true ? '完成' : account.ok === false ? account.error || '失败' : '处理中'}
+                      {account.ok === true ? '完成' : account.ok === false ? account.error || '失败' : '处理中…'}
                     </Text>
                   </div>
+                  {account.ok === null && account.hint ? (
+                    <Paragraph className="account-hint">{account.hint}</Paragraph>
+                  ) : null}
                   {account.accessToken ? (
                     <Space.Compact className="token-box">
                       <Input value={account.accessToken} readOnly />
@@ -304,7 +331,7 @@ export default function App() {
               ))}
             </div>
           ) : (
-            <Alert type="info" showIcon message="等待账号进度更新…" style={{ marginTop: 16 }} />
+            <Alert type="info" showIcon message="任务已提交，正在启动，请稍候…" style={{ marginTop: 16 }} />
           )}
 
           {status?.paymentLinks?.length ? (

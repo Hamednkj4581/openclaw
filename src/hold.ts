@@ -9,33 +9,27 @@ export function resolveHoldMinutes(): number {
     return ALLOWED_HOLD_MINUTES.has(raw) ? raw : 15;
 }
 
-/** 成功后先回传网页，再进入保持等待 */
-export async function notifyWebAccountSuccess(email: string, accessToken: string, holdUntil: number): Promise<void> {
+function webCallbackConfig(): { taskId: string; url: string; secret: string; index: number } | null {
     const taskId = (process.env.WEB_TASK_ID || '').trim();
     const url = (process.env.WEB_CALLBACK_URL || '').trim();
     const secret = (process.env.WEBHOOK_SECRET || '').trim();
+    if (!taskId || !url || !secret) return null;
     const index = Number(process.env.WEB_ACCOUNT_INDEX || '0');
-    if (!taskId || !url || !secret) return;
+    return { taskId, url, secret, index: Number.isInteger(index) ? index : 0 };
+}
 
+async function postWebCallback(payload: Record<string, unknown>): Promise<void> {
+    const config = webCallbackConfig();
+    if (!config) return;
     try {
-        const response = await fetch(url, {
+        const response = await fetch(config.url, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json; charset=utf-8',
-                'X-Webhook-Secret': secret,
+                'X-Webhook-Secret': config.secret,
                 'User-Agent': 'gpt-free-register-web-callback',
             },
-            body: JSON.stringify({
-                taskId,
-                event: 'account_done',
-                account: {
-                    index: Number.isInteger(index) ? index : 0,
-                    email,
-                    ok: true,
-                    accessToken,
-                    holdUntil,
-                },
-            }),
+            body: JSON.stringify({ taskId: config.taskId, ...payload }),
         });
         if (!response.ok) {
             logger.warn('网页回调失败：HTTP %s', response.status);
@@ -44,6 +38,38 @@ export async function notifyWebAccountSuccess(email: string, accessToken: string
         const message = error instanceof Error ? error.message : String(error);
         logger.warn('网页回调异常：%s', message);
     }
+}
+
+/** 向网页回传友好进度（不含技术细节；失败不影响主流程） */
+export async function notifyWebProgress(message: string, email?: string): Promise<void> {
+    const config = webCallbackConfig();
+    if (!config) return;
+    const text = message.trim().slice(0, 80);
+    if (!text) return;
+    await postWebCallback({
+        event: 'progress',
+        message: text,
+        account: {
+            index: config.index,
+            ...(email ? { email } : {}),
+        },
+    });
+}
+
+/** 成功后先回传网页，再进入保持等待 */
+export async function notifyWebAccountSuccess(email: string, accessToken: string, holdUntil: number): Promise<void> {
+    const config = webCallbackConfig();
+    if (!config) return;
+    await postWebCallback({
+        event: 'account_done',
+        account: {
+            index: config.index,
+            email,
+            ok: true,
+            accessToken,
+            holdUntil,
+        },
+    });
 }
 
 export async function waitHoldMinutes(holdMinutes: number, holdUntil: number): Promise<void> {

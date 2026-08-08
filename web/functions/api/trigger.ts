@@ -50,7 +50,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const state: TaskState = {
     mode,
     phase: 'submitted',
-    message: '已提交，等待开始处理',
+    message: '已提交，正在启动任务，请稍候…',
     total: 0,
     accounts: [],
     createdAt: Date.now(),

@@ -22,7 +22,7 @@ import {
     SIGNUP_SELECTORS,
 } from './selectors.js';
 import { parseLoginAccount } from './loginAccount.js';
-import { notifyWebAccountSuccess, resolveHoldMinutes, waitHoldMinutes } from './hold.js';
+import { notifyWebAccountSuccess, notifyWebProgress, resolveHoldMinutes, waitHoldMinutes } from './hold.js';
 
 const MAX_TIMEOUT = Math.pow(2, 31) - 1;
 const EVIDENCE_TIMEOUT_MS = 15_000;
@@ -354,7 +354,9 @@ async function extractAccessToken(page: Page): Promise<string> {
         sensitiveValues.add(account.email);
         sensitiveValues.add(account.password);
         sensitiveValues.add(account.otpSecret);
+        await notifyWebProgress('正在准备，请稍候…', account.email);
         await validateCapSolver();
+        await notifyWebProgress('准备完成，正在打开服务…', account.email);
 
         const enable711Proxy = is711ProxyEnabled();
         const proxy = enable711Proxy ? buildJapanStickyProxy() : null;
@@ -405,9 +407,11 @@ async function extractAccessToken(page: Page): Promise<string> {
         }
 
         await evidence(page, 'chatgpt-opened');
+        await notifyWebProgress('正在打开登录页面…', account.email);
         await solveCloudflareIfPresent(page);
         await openLogin(page);
         await evidence(page, 'login-opened');
+        await notifyWebProgress('正在填写登录信息…', account.email);
         await waitForEmailFormReady(page);
         await fillEmailInput(page, account.email);
         await evidence(page, 'email-entered');
@@ -429,6 +433,7 @@ async function extractAccessToken(page: Page): Promise<string> {
         await evidence(page, `after-email-${state}`);
 
         if (state === 'password') {
+            await notifyWebProgress('正在验证密码…', account.email);
             await page.type("//input[@type='password' and not(@disabled)]", account.password);
             await evidence(page, 'password-entered');
             await clickContinue(page);
@@ -438,6 +443,7 @@ async function extractAccessToken(page: Page): Promise<string> {
         }
 
         if (state === 'mfa-challenge') {
+            await notifyWebProgress('正在验证身份，请稍候…', account.email);
             await submitMfa(page, account.otpSecret);
             await evidence(page, 'mfa-submitted');
             await solveCloudflareIfPresent(page);
@@ -451,6 +457,7 @@ async function extractAccessToken(page: Page): Promise<string> {
         }
 
         await evidence(page, 'authenticated');
+        await notifyWebProgress('登录即将完成，正在保存结果…', account.email);
         const accessToken = await extractAccessToken(page);
         // GitHub 会把日志里与 Secret 重合的子串打成 ***；Base64 后再打印可避开掩码。
         const accessTokenB64 = Buffer.from(accessToken, 'utf8').toString('base64');
@@ -468,6 +475,7 @@ async function extractAccessToken(page: Page): Promise<string> {
         const holdMinutes = resolveHoldMinutes();
         const holdUntil = Date.now() + holdMinutes * 60 * 1000;
         // 先回传 token，再进入保持等待
+        await notifyWebProgress(`已完成，将保持约 ${holdMinutes} 分钟…`, account.email);
         await notifyWebAccountSuccess(account.email, accessToken, holdUntil);
         logger.info('已打印 access token（Base64）');
         await waitHoldMinutes(holdMinutes, holdUntil);

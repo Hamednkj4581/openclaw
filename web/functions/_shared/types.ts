@@ -8,6 +8,8 @@ export interface AccountResult {
   ok: boolean | null;
   accessToken?: string;
   error?: string;
+  /** 进行中友好提示（不含技术细节） */
+  hint?: string;
   /** 登录保持结束时间（epoch ms），有值时前端显示倒计时 */
   holdUntil?: number;
 }

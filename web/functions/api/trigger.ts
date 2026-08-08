@@ -152,24 +152,27 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     payment_link_type: paymentLinkType,
     payment_card: paymentLinkType === 'gcash' ? paymentCard : '',
     gc_ph_api_key: gcPhApiKey,
-    hero_sms_api_key: mode === 'bind_phone' ? heroSmsApiKey : '',
-    hero_sms_service: mode === 'bind_phone' ? heroSmsService : '',
-    hero_sms_country: mode === 'bind_phone' ? heroSmsCountry : '',
     hold_minutes: holdMinutes,
   };
+
+  if (mode === 'bind_phone') {
+    inputs.hero_sms_api_key = heroSmsApiKey;
+    inputs.hero_sms_service = heroSmsService;
+    inputs.hero_sms_country = heroSmsCountry;
+  }
 
   if (mode === 'register') {
     inputs.forwarding_emails = (body.forwarding_emails || '').trim();
     inputs.enable_mfa = String(body.enable_mfa !== false);
   }
 
-  try {
-    await dispatchWorkflow(context.env, mode, inputs);
-  } catch {
+  const dispatched = await dispatchWorkflow(context.env, mode, inputs);
+  if (!dispatched.ok) {
+    const tip = dispatched.message || '提交失败，请稍后重试';
     state.phase = 'failed';
-    state.message = '提交失败，请稍后重试';
+    state.message = tip;
     await writeTask(context.env, taskId, state);
-    return friendlyError(502, '提交失败，请稍后重试');
+    return friendlyError(dispatched.status >= 400 && dispatched.status < 600 ? dispatched.status : 502, tip);
   }
 
   return json({ ok: true, taskId, runName, message: state.message });

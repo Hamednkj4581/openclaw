@@ -17,30 +17,78 @@ function githubHeaders(env: Env): HeadersInit {
   };
 }
 
+export type WorkflowDispatchResult =
+    | { ok: true }
+    | { ok: false; status: number; message: string };
+
+/** 将 GitHub API 错误转为用户可读文案（不含 token 等敏感信息） */
+export function formatGithubDispatchError(status: number, raw: string): string {
+    let detail = '';
+    try {
+        const body = JSON.parse(raw) as { message?: string; errors?: Array<{ message?: string }> };
+        const parts: string[] = [];
+        if (body.message) parts.push(body.message);
+        if (Array.isArray(body.errors)) {
+            for (const err of body.errors) {
+                if (err.message) parts.push(err.message);
+            }
+        }
+        detail = parts.join('；');
+    } catch {
+        detail = raw.trim().slice(0, 160);
+    }
+
+    if (status === 401) return 'GitHub 凭据无效，请检查 Pages 上的 GITHUB_PAT';
+    if (status === 403) return 'GitHub 无权限触发 Actions，请确认 PAT 含 actions:write';
+    if (status === 404) return '找不到对应工作流，请确认仓库已推送最新 workflow 文件';
+    if (status === 422) {
+        if (/unexpected inputs/i.test(detail)) {
+            return `工作流参数不匹配：${detail}`;
+        }
+        if (/required/i.test(detail)) {
+            return `缺少必填参数：${detail}`;
+        }
+        return detail ? `请求参数无效：${detail}` : '请求参数无效';
+    }
+    if (detail) return `触发 Actions 失败（HTTP ${status}）：${detail}`;
+    return `触发 Actions 失败（HTTP ${status}）`;
+}
+
 export async function dispatchWorkflow(
-  env: Env,
-  mode: TaskMode,
-  inputs: Record<string, string>
-): Promise<void> {
-  const url =
-    `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}` +
-    `/actions/workflows/${workflowFile(mode)}/dispatches`;
+    env: Env,
+    mode: TaskMode,
+    inputs: Record<string, string>
+): Promise<WorkflowDispatchResult> {
+    const url =
+        `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}` +
+        `/actions/workflows/${workflowFile(mode)}/dispatches`;
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      ...githubHeaders(env),
-      'Content-Type': 'application/json; charset=utf-8',
-    },
-    body: JSON.stringify({
-      ref: env.GITHUB_REF || 'main',
-      inputs,
-    }),
-  });
+    let response: Response;
+    try {
+        response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                ...githubHeaders(env),
+                'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: JSON.stringify({
+                ref: env.GITHUB_REF || 'main',
+                inputs,
+            }),
+        });
+    } catch (error) {
+        const tip = error instanceof Error ? error.message : String(error);
+        return { ok: false, status: 0, message: `无法连接 GitHub：${tip.slice(0, 120)}` };
+    }
 
-  if (response.status !== 204) {
-    throw new Error('trigger_failed');
-  }
+    if (response.status === 204) return { ok: true };
+
+    const raw = await response.text().catch(() => '');
+    return {
+        ok: false,
+        status: response.status,
+        message: formatGithubDispatchError(response.status, raw),
+    };
 }
 
 type WorkflowRun = {

@@ -18,6 +18,7 @@ export interface AccountStatus {
   accessToken?: string;
   error?: string;
   hint?: string;
+  paymentLink?: string;
   holdUntil?: number;
 }
 
@@ -28,8 +29,6 @@ export interface TaskStatus {
   total: number;
   doneCount: number;
   accounts: AccountStatus[];
-  paymentLinks?: string[];
-  paymentMessage?: string;
   done: boolean;
   success: boolean;
 }

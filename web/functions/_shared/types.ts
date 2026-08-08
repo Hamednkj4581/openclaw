@@ -10,6 +10,8 @@ export interface AccountResult {
   error?: string;
   /** 进行中友好提示（不含技术细节） */
   hint?: string;
+  /** 单账号支付链接（URL） */
+  paymentLink?: string;
   /** 登录保持结束时间（epoch ms），有值时前端显示倒计时 */
   holdUntil?: number;
 }
@@ -20,7 +22,7 @@ export interface TaskState {
   message: string;
   total: number;
   accounts: AccountResult[];
-  /** oai9 提链得到的最终支付链接列表 */
+  /** @deprecated 提链已改为账号级 paymentLink */
   paymentLinks?: string[];
   paymentMessage?: string;
   createdAt: number;

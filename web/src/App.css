@@ -93,23 +93,16 @@
   font-size: 14px;
 }
 
-.payment-links {
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid var(--line);
-}
-
-.payment-links-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 10px;
-}
-
-.payment-link-list {
+.payment-box {
+  margin-top: 12px;
   display: grid;
   gap: 10px;
+}
+
+.payment-qr {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
 }
 
 @media (max-width: 640px) {

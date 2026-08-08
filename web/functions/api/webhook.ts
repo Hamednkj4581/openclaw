@@ -12,12 +12,11 @@ interface WebhookBody {
     email?: string;
     ok?: boolean;
     accessToken?: string;
+    paymentLink?: string;
     error?: string;
     holdUntil?: number;
   };
   ok?: boolean;
-  paymentLinks?: string[];
-  paymentMessage?: string;
 }
 
 function ensureAccountSlot(state: TaskState, index: number, email: string): AccountResult {
@@ -30,20 +29,6 @@ function ensureAccountSlot(state: TaskState, index: number, email: string): Acco
     row.email = email;
   }
   return row;
-}
-
-function normalizePaymentLinks(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  const links: string[] = [];
-  const seen = new Set<string>();
-  for (const item of value) {
-    if (typeof item !== 'string') continue;
-    const link = item.trim();
-    if (!link || seen.has(link)) continue;
-    seen.add(link);
-    links.push(link);
-  }
-  return links;
 }
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
@@ -86,7 +71,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     if (Number.isInteger(index) && index >= 0) {
       const email = (body.account?.email || '').trim() || `账号 ${index + 1}`;
       const row = ensureAccountSlot(state, index, email);
-      if (row.ok === null) row.hint = tip;
+      // 未结束，或已成功但仍在补提链时，更新账号提示
+      if (row.ok === null || (row.ok === true && !row.paymentLink)) {
+        row.hint = tip;
+      }
       const total = state.total || state.accounts.length || 0;
       state.message = total > 1 ? `账号 ${index + 1}/${total}：${tip}` : tip;
     } else {
@@ -97,55 +85,60 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     if (!Number.isInteger(index) || index < 0) return friendlyError(400, '账号序号无效');
     const email = (body.account?.email || '').trim() || `账号 ${index + 1}`;
     const row = ensureAccountSlot(state, index, email);
-    row.ok = Boolean(body.account?.ok);
-    delete row.hint;
-    if (row.ok && body.account?.accessToken) {
-      row.accessToken = body.account.accessToken;
+    const ok = Boolean(body.account?.ok);
+    row.ok = ok;
+
+    if (!ok) {
+      delete row.accessToken;
+      delete row.paymentLink;
+      delete row.holdUntil;
+      delete row.hint;
+      row.error = (body.account?.error || '处理失败').slice(0, 80);
+    } else {
       delete row.error;
-      const holdUntil = Number(body.account.holdUntil);
+      if (body.account?.accessToken) {
+        row.accessToken = body.account.accessToken;
+      }
+      const paymentLink = (body.account?.paymentLink || '').trim();
+      if (paymentLink) {
+        row.paymentLink = paymentLink;
+        delete row.hint;
+      }
+      const holdUntil = Number(body.account?.holdUntil);
       if (Number.isFinite(holdUntil) && holdUntil > 0) {
         row.holdUntil = holdUntil;
-      } else {
-        delete row.holdUntil;
       }
-    } else {
-      delete row.accessToken;
-      delete row.holdUntil;
-      row.error = (body.account?.error || '处理失败').slice(0, 80);
+      // 仅补传支付链接时保留已有 hint，直到拿到链接
+      if (paymentLink || row.paymentLink) {
+        delete row.hint;
+      }
     }
+
     if (!state.total) state.total = Math.max(state.accounts.length, index + 1);
     const doneCount = state.accounts.filter((a) => a.ok !== null).length;
     state.phase = 'processing';
     const pending = state.accounts.filter((a) => a.ok === null).length;
-    state.message =
-      pending > 0
+    const tip = (body.account?.paymentLink || '').trim()
+      ? '支付链接已更新'
+      : pending > 0
         ? `已完成 ${doneCount}/${state.total}，其余账号继续处理中…`
         : `账号已全部处理完（${doneCount}/${state.total}），正在收尾…`;
+    state.message = tip;
   } else if (body.event === 'finished') {
-    const links = normalizePaymentLinks(body.paymentLinks);
-    if (links.length) {
-      state.paymentLinks = links;
-    } else {
-      delete state.paymentLinks;
-    }
-    const paymentMessage = typeof body.paymentMessage === 'string' ? body.paymentMessage.trim().slice(0, 200) : '';
-    if (paymentMessage) {
-      state.paymentMessage = paymentMessage;
-    } else {
-      delete state.paymentMessage;
-    }
+    delete state.paymentLinks;
+    delete state.paymentMessage;
 
     const allOk = state.accounts.length > 0 && state.accounts.every((a) => a.ok === true);
     const anyOk = state.accounts.some((a) => a.ok === true);
     if (allOk) {
       state.phase = 'done';
-      state.message = paymentMessage || '全部完成';
+      state.message = '全部完成';
     } else if (anyOk) {
       state.phase = 'done';
-      state.message = paymentMessage || '部分完成';
+      state.message = '部分完成';
     } else {
       state.phase = 'failed';
-      state.message = paymentMessage || '全部失败';
+      state.message = '全部失败';
     }
   } else {
     return friendlyError(400, '未知事件');

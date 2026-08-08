@@ -22,7 +22,7 @@ import {
     SIGNUP_SELECTORS,
 } from './selectors.js';
 import { parseLoginAccount } from './loginAccount.js';
-import { notifyWebAccountSuccess, notifyWebProgress, resolveHoldMinutes, waitHoldMinutes } from './hold.js';
+import { finishAccountSuccess, notifyWebProgress } from './hold.js';
 
 const MAX_TIMEOUT = Math.pow(2, 31) - 1;
 const EVIDENCE_TIMEOUT_MS = 15_000;
@@ -472,13 +472,8 @@ async function extractAccessToken(page: Page): Promise<string> {
                 `accessToken (Base64，本地解码：\`base64 -d\`)\n\n\`\`\`\n${accessTokenB64}\n\`\`\`\n`
             );
 
-        const holdMinutes = resolveHoldMinutes();
-        const holdUntil = Date.now() + holdMinutes * 60 * 1000;
-        // 先回传 token，再进入保持等待
-        await notifyWebProgress(`已完成，将保持约 ${holdMinutes} 分钟…`, account.email);
-        await notifyWebAccountSuccess(account.email, accessToken, holdUntil);
         logger.info('已打印 access token（Base64）');
-        await waitHoldMinutes(holdMinutes, holdUntil);
+        await finishAccountSuccess(account.email, accessToken);
     } catch (error) {
         await fail(error);
     } finally {

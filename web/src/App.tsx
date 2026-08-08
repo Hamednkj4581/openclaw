@@ -6,6 +6,7 @@ import {
   Form,
   Input,
   Progress,
+  QRCode,
   Radio,
   Select,
   Space,
@@ -315,9 +316,7 @@ export default function App() {
                       {account.ok === true ? '完成' : account.ok === false ? account.error || '失败' : '处理中…'}
                     </Text>
                   </div>
-                  {account.ok === null && account.hint ? (
-                    <Paragraph className="account-hint">{account.hint}</Paragraph>
-                  ) : null}
+                  {account.hint ? <Paragraph className="account-hint">{account.hint}</Paragraph> : null}
                   {account.accessToken ? (
                     <Space.Compact className="token-box">
                       <Input value={account.accessToken} readOnly />
@@ -326,6 +325,20 @@ export default function App() {
                       </Button>
                     </Space.Compact>
                   ) : null}
+                  {account.paymentLink ? (
+                    <div className="payment-box">
+                      <Text strong>支付链接</Text>
+                      <div className="payment-qr">
+                        <QRCode value={account.paymentLink} size={148} />
+                      </div>
+                      <Space.Compact className="token-box">
+                        <Input value={account.paymentLink} readOnly />
+                        <Button icon={<CopyOutlined />} onClick={() => void copyText(account.paymentLink!, '已复制支付链接')}>
+                          复制
+                        </Button>
+                      </Space.Compact>
+                    </div>
+                  ) : null}
                   <AccountHoldCountdown holdUntil={account.holdUntil} />
                 </div>
               ))}
@@ -333,32 +346,6 @@ export default function App() {
           ) : (
             <Alert type="info" showIcon message="任务已提交，正在启动，请稍候…" style={{ marginTop: 16 }} />
           )}
-
-          {status?.paymentLinks?.length ? (
-            <div className="payment-links">
-              <div className="payment-links-head">
-                <Text strong>支付链接</Text>
-                <Button
-                  size="small"
-                  icon={<CopyOutlined />}
-                  onClick={() => void copyText(status.paymentLinks!.join('\n'), '已复制全部链接')}
-                >
-                  复制全部
-                </Button>
-              </div>
-              {status.paymentMessage ? <Paragraph type="secondary">{status.paymentMessage}</Paragraph> : null}
-              <div className="payment-link-list">
-                {status.paymentLinks.map((link) => (
-                  <Space.Compact className="token-box" key={link}>
-                    <Input value={link} readOnly />
-                    <Button icon={<CopyOutlined />} onClick={() => void copyText(link)}>
-                      复制
-                    </Button>
-                  </Space.Compact>
-                ))}
-              </div>
-            </div>
-          ) : null}
         </Card>
       )}
     </div>

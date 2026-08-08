@@ -108,26 +108,7 @@ if __name__ == "__main__":
         payload["account"] = account
     elif event == "finished":
         payload["ok"] = (os.environ.get("WEB_FINISHED_OK") or "true").lower() in ("1", "true", "yes")
-        # 汇总阶段产物：每行一个支付链接；可选说明文案
-        links_path = (os.environ.get("WEB_PAYMENT_LINKS_FILE") or "payment-links.txt").strip()
-        message_path = (os.environ.get("WEB_PAYMENT_MESSAGE_FILE") or "payment-message.txt").strip()
-        links: list[str] = []
-        if links_path and os.path.isfile(links_path):
-            try:
-                with open(links_path, encoding="utf-8") as handle:
-                    links = [line.strip() for line in handle if line.strip()]
-            except OSError as error:
-                print(f"读取支付链接失败: {error}")
-        if links:
-            payload["paymentLinks"] = links
-        if message_path and os.path.isfile(message_path):
-            try:
-                with open(message_path, encoding="utf-8") as handle:
-                    message = handle.read().strip()
-                if message:
-                    payload["paymentMessage"] = message[:200]
-            except OSError as error:
-                print(f"读取提链说明失败: {error}")
+        # 提链已改由各账号 job 单独回传 paymentLink，finished 不再附带汇总链接
     else:
         raise SystemExit(f"未知 WEB_EVENT: {event}")
 

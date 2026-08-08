@@ -1,5 +1,6 @@
 import Utility from './Utility.js';
 import logger from './logger.js';
+import { extractAccountPaymentLink } from './paymentLink.js';
 
 const ALLOWED_HOLD_MINUTES = new Set([5, 10, 15, 30]);
 
@@ -56,8 +57,13 @@ export async function notifyWebProgress(message: string, email?: string): Promis
     });
 }
 
-/** 成功后先回传网页，再进入保持等待 */
-export async function notifyWebAccountSuccess(email: string, accessToken: string, holdUntil: number): Promise<void> {
+/** 成功后回传 access token（可附带支付链接） */
+export async function notifyWebAccountSuccess(
+    email: string,
+    accessToken: string,
+    holdUntil: number,
+    paymentLink?: string
+): Promise<void> {
     const config = webCallbackConfig();
     if (!config) return;
     await postWebCallback({
@@ -68,8 +74,43 @@ export async function notifyWebAccountSuccess(email: string, accessToken: string
             ok: true,
             accessToken,
             holdUntil,
+            ...(paymentLink ? { paymentLink } : {}),
         },
     });
+}
+
+/** 账号已成功后补传支付链接 */
+export async function notifyWebPaymentLink(email: string, paymentLink: string): Promise<void> {
+    const config = webCallbackConfig();
+    if (!config) return;
+    const link = paymentLink.trim();
+    if (!link) return;
+    await postWebCallback({
+        event: 'account_done',
+        account: {
+            index: config.index,
+            email,
+            ok: true,
+            paymentLink: link,
+        },
+    });
+}
+
+/**
+ * 先回传 token，再按需单账号提链并回传 URL，最后进入保持等待。
+ */
+export async function finishAccountSuccess(email: string, accessToken: string): Promise<void> {
+    const holdMinutes = resolveHoldMinutes();
+    const holdUntil = Date.now() + holdMinutes * 60 * 1000;
+    await notifyWebAccountSuccess(email, accessToken, holdUntil);
+
+    const paymentLink = await extractAccountPaymentLink(accessToken, (message) => notifyWebProgress(message, email));
+    if (paymentLink) {
+        await notifyWebPaymentLink(email, paymentLink);
+    }
+
+    await notifyWebProgress(`已完成，将保持约 ${holdMinutes} 分钟…`, email);
+    await waitHoldMinutes(holdMinutes, holdUntil);
 }
 
 export async function waitHoldMinutes(holdMinutes: number, holdUntil: number): Promise<void> {

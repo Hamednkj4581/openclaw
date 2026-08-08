@@ -204,6 +204,8 @@ jobs:
           ENABLE_CHATGPT_MFA: ${{ inputs.enable_mfa }}
           ENABLE_711_PROXY: ${{ inputs.enable_711_proxy }}
           HOLD_MINUTES: ${{ inputs.hold_minutes }}
+          PAYMENT_LINK_TYPE: ${{ inputs.payment_link_type }}
+          PAYMENT_CARD: ${{ inputs.payment_card }}
           WEB_TASK_ID: ${{ inputs.web_task_id }}
           WEB_CALLBACK_URL: ${{ secrets.WEB_CALLBACK_URL }}
           WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
@@ -224,14 +226,15 @@ jobs:
           npm install
           hold="${{ inputs.hold_minutes }}"
           mode="${{ inputs.mode }}"
+          # gcash 单账号提链最多约 10 分钟，额外预留
+          extra=0
+          if [ "${{ inputs.payment_link_type }}" = "gcash" ]; then extra=10; fi
           if [ "$mode" = "login" ]; then
             npm run build:login
-            # 登录耗时缓冲 10 分钟 + 保持时长
-            timeout -k 30s "$(( (hold + 10) * 60 ))s" node dist/login.js
+            timeout -k 30s "$(( (hold + 10 + extra) * 60 ))s" node dist/login.js
           else
             npm run build
-            # 注册耗时缓冲 15 分钟 + 保持时长
-            timeout -k 30s "$(( (hold + 15) * 60 ))s" node dist/app.js
+            timeout -k 30s "$(( (hold + 15 + extra) * 60 ))s" node dist/app.js
           fi
 
       - name: 通知网页控制台账号失败
@@ -259,6 +262,7 @@ jobs:
             cookies/
             access-token.txt
             access-token.b64.txt
+            payment-link.txt
           if-no-files-found: ignore
           retention-days: 7
 
@@ -284,16 +288,14 @@ jobs:
           pattern: account-*
           path: summaries
 
-      - name: 合并结果并处理支付提链
+      - name: 合并结果并打包 session/cookie
         env:
           SUMMARIES_DIR: summaries
-          PAYMENT_LINK_TYPE: ${{ inputs.payment_link_type }}
-          PAYMENT_CARD: ${{ inputs.payment_card }}
           # 登录：无 token 不强制失败；注册：无成功结果则失败
           REQUIRE_RESULTS: ${{ inputs.mode == 'register' && '1' || '0' }}
         run: python .github/scripts/collect_payment_summary.py
 
-      - name: 上传支付汇总产物
+      - name: 上传汇总产物
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -301,8 +303,6 @@ jobs:
           path: |
             all-access-tokens.txt
             web-summary.txt
-            payment-links.txt
-            payment-message.txt
             sessions-and-cookies.zip
           if-no-files-found: ignore
           retention-days: 7

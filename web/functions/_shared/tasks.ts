@@ -29,10 +29,9 @@ export function publicStatus(state: TaskState) {
       accessToken: a.accessToken || undefined,
       error: a.error || undefined,
       hint: a.hint || undefined,
+      paymentLink: a.paymentLink || undefined,
       holdUntil: a.holdUntil || undefined,
     })),
-    paymentLinks: state.paymentLinks?.length ? state.paymentLinks : undefined,
-    paymentMessage: state.paymentMessage || undefined,
     done: state.phase === 'done' || state.phase === 'failed',
     success: state.phase === 'done',
   };

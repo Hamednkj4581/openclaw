@@ -1,6 +1,7 @@
 import type { AccountResult, Env, TaskPhase, TaskState } from '../_shared/types';
 import { appendProgressLog, friendlyError, json } from '../_shared/types';
 import {
+  bumpTaskTotal,
   ensureAccount,
   readTask,
   writeAccount,
@@ -68,14 +69,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       return json({ ok: true, ignored: true });
     }
     const total = Number(body.total) || 0;
-    state.total = total;
+    if (total > 0) state.total = Math.max(state.total || 0, total);
     state.phase = 'processing';
     state.message = total > 0 ? `已开始处理（共 ${total} 个账号），请耐心等待…` : '已开始处理，请耐心等待…';
     appendProgressLog(state, state.message);
 
     const accounts: AccountResult[] = [];
-    if (total > 0) {
-      for (let index = 0; index < total; index++) {
+    const slotTotal = state.total || total;
+    if (slotTotal > 0) {
+      for (let index = 0; index < slotTotal; index++) {
         // 已有账号进度则保留，避免 started 重放清空并行回传
         const existing = state.accounts.find((a) => a.index === index);
         if (existing) {
@@ -121,8 +123,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       await writeAccount(context.env, taskId, row);
 
       state.phase = 'processing';
-      const total = state.total || Math.max(state.accounts.length, index + 1);
-      if (!state.total) state.total = total;
+      bumpTaskTotal(state, index);
+      const total = state.total;
       state.message = total > 1 ? `账号 ${index + 1}/${total}：${tip}` : tip;
       await writeTaskMeta(context.env, taskId, state);
     } else {
@@ -228,7 +230,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       return json({ ok: true });
     }
 
-    if (!state.total) state.total = Math.max(state.accounts.length, index + 1);
+    bumpTaskTotal(state, index);
     // 用刚写入的账号刷新内存视图再汇总
     const merged = await readTask(context.env, taskId);
     if (merged) {

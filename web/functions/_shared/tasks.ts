@@ -42,6 +42,32 @@ async function migrateLegacyAccounts(
   );
 }
 
+function placeholderAccount(index: number): AccountResult {
+  return {
+    index,
+    email: `账号 ${index + 1}`,
+    ok: null,
+    hint: '排队中…',
+  };
+}
+
+/** 扫描已落 KV 的账号序号，避免 meta.total 偏小导致漏读 */
+async function listAccountIndices(env: Env, taskId: string): Promise<number[]> {
+  const prefix = accountKey(taskId, 0).replace(/:0$/, ':');
+  const indices: number[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await env.TASKS.list({ prefix, cursor });
+    for (const key of page.keys) {
+      const suffix = key.name.slice(prefix.length);
+      const index = Number(suffix);
+      if (Number.isInteger(index) && index >= 0) indices.push(index);
+    }
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  return indices;
+}
+
 async function loadAccounts(
   env: Env,
   taskId: string,
@@ -53,7 +79,8 @@ async function loadAccounts(
     legacyByIndex.set(row.index, row);
   }
 
-  const maxIndex = Math.max(total - 1, ...[...legacyByIndex.keys()], -1);
+  const kvIndices = await listAccountIndices(env, taskId);
+  const maxIndex = Math.max(total - 1, ...kvIndices, ...legacyByIndex.keys(), -1);
   if (maxIndex < 0) return [];
 
   const indexes = Array.from({ length: maxIndex + 1 }, (_, i) => i);
@@ -61,11 +88,18 @@ async function loadAccounts(
     indexes.map(async (index) => {
       const fromKey = await readAccount(env, taskId, index);
       if (fromKey) return fromKey;
-      return legacyByIndex.get(index) || null;
+      const legacyRow = legacyByIndex.get(index);
+      if (legacyRow) return legacyRow;
+      return placeholderAccount(index);
     }),
   );
 
-  return rows.filter((row): row is AccountResult => row !== null);
+  return rows;
+}
+
+/** 根据账号序号抬高 total，避免 started 迟到/失败后 total 锁死在较小值 */
+export function bumpTaskTotal(state: TaskState, index: number): void {
+  state.total = Math.max(state.total || 0, index + 1);
 }
 
 export async function readTask(env: Env, taskId: string): Promise<TaskState | null> {
@@ -73,6 +107,9 @@ export async function readTask(env: Env, taskId: string): Promise<TaskState | nu
   if (!raw) return null;
   const state = JSON.parse(raw) as TaskState;
   state.accounts = await loadAccounts(env, taskId, state.accounts, state.total || 0);
+  if (state.accounts.length > (state.total || 0)) {
+    state.total = state.accounts.length;
+  }
   return state;
 }
 

@@ -68,6 +68,14 @@ function parseMode(raw: unknown): TaskMode | null {
   return null;
 }
 
+/** 与 Actions 矩阵一致：按行统计非空账号条数 */
+function countAccountLines(accounts: string): number {
+  return accounts
+    .split(/(?:\r?\n|;)+/)
+    .map((item) => item.trim())
+    .filter(Boolean).length;
+}
+
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const missing = requireEnv(context.env);
   if (missing) return friendlyError(503, missing);
@@ -125,12 +133,21 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   const taskId = crypto.randomUUID();
   const runName = commitMessage(mode);
+  const accountCount = countAccountLines(accounts);
   const state: TaskState = {
     mode,
     phase: 'submitted',
-    message: '已提交，正在启动任务，请稍候…',
-    total: 0,
-    accounts: [],
+    message:
+      accountCount > 0
+        ? `已提交（共 ${accountCount} 个账号），正在启动任务，请稍候…`
+        : '已提交，正在启动任务，请稍候…',
+    total: accountCount,
+    accounts: Array.from({ length: accountCount }, (_, index) => ({
+      index,
+      email: `账号 ${index + 1}`,
+      ok: null,
+      hint: '排队中…',
+    })),
     runName,
     createdAt: Date.now(),
     updatedAt: Date.now(),

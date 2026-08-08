@@ -807,6 +807,7 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
                 const message = error instanceof Error ? error.message : String(error);
                 logger.warn('开启 ChatGPT 2FA 失败，不影响后续流程：%s', message);
                 githubAnnotation('warning', `开启 ChatGPT 2FA 失败，已跳过：${message}`);
+                await notifyWebProgress('两步验证未能开启，已跳过，不影响后续', email).catch(() => undefined);
                 await evidence(page, 'mfa-enable-failed').catch(() => undefined);
             }
         }

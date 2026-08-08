@@ -61,8 +61,9 @@ export async function capturePaymentQr(
         return { dataUrl };
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        const tip = `提取支付二维码失败：${message}`.slice(0, 160);
-        logger.warn('%s（不影响主流程）', tip);
+        // 网页端只展示业务文案；具体异常留给 Actions 日志
+        const tip = '支付链接已就绪，但二维码获取失败';
+        logger.warn('提取支付二维码失败（不影响主流程）：%s', message);
         return { error: tip };
     } finally {
         if (!keepOpen) {

@@ -2,7 +2,7 @@ import type { Browser } from 'puppeteer';
 import fs from 'fs';
 import Utility from './Utility.js';
 import logger from './logger.js';
-import { extractAccountPaymentLink } from './paymentLink.js';
+import { extractAccountPaymentLink, isPaymentLinkEnabled } from './paymentLink.js';
 import { capturePaymentQr, type ProxyAuth } from './paymentQr.js';
 
 const ALLOWED_HOLD_MINUTES = new Set([0, 5, 10, 15, 30]);
@@ -175,6 +175,9 @@ export async function finishAccountSuccess(
     });
 
     logger.info('登录/注册已成功，进入提链阶段（提链不占用保持时长）');
+    if (isPaymentLinkEnabled()) {
+        await notifyWebProgress('账号已就绪，正在处理支付提链…', email).catch(() => undefined);
+    }
     const payment = await extractAccountPaymentLink(accessToken, (message) => notifyWebProgress(message, email));
     const paymentLink = payment.link;
     let paymentError = payment.error;
@@ -187,19 +190,22 @@ export async function finishAccountSuccess(
             paymentQr = captured?.dataUrl;
             if (!paymentQr) {
                 paymentError = captured?.error?.trim()
-                    || '支付链接已就绪，但二维码图片获取失败';
+                    || '支付链接已就绪，但二维码获取失败';
                 logger.warn(paymentError);
                 await notifyWebProgress(paymentError, email).catch(() => undefined);
+            } else {
+                await notifyWebProgress('支付二维码已就绪', email).catch(() => undefined);
             }
         } else {
-            paymentError = '提链成功但无浏览器实例，跳过二维码提取';
-            logger.warn(paymentError);
+            paymentError = '支付链接已就绪，但二维码获取失败';
+            logger.warn('提链成功但无浏览器实例，跳过二维码提取');
             await notifyWebProgress(paymentError, email).catch(() => undefined);
         }
         // 取码失败时立刻回传 paymentError，网页端能马上看到原因（不仅靠进度文案）
         await notifyWebPaymentLink(email, paymentLink, paymentQr, paymentQr ? undefined : paymentError);
     } else if (paymentError) {
         logger.info('提链未完成：%s', paymentError);
+        await notifyWebProgress(paymentError, email).catch(() => undefined);
     } else {
         logger.info('提链阶段未启用或未得到支付链接，跳过二维码提取');
     }
@@ -219,8 +225,9 @@ export async function finishAccountSuccess(
     if (holdMinutes > 0) {
         await notifyWebProgress(`将保持约 ${holdMinutes} 分钟后关闭…`, email);
         await waitHoldMinutes(holdMinutes, holdUntil);
+        await notifyWebProgress('保持结束，正在关闭…', email).catch(() => undefined);
     } else {
-        await notifyWebProgress('保持为 0 分钟，即将关闭…', email);
+        await notifyWebProgress('即将关闭…', email);
         logger.info('保持时长为 0，跳过等待直接退出');
     }
 }

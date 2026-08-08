@@ -186,6 +186,20 @@ function formatEligibilitySkip(eligibility: EligibilityResult): string {
     return `暂无支付资格（${parts.join('，')}）`;
 }
 
+/** 提链失败给网页端的文案：只保留业务含义，不含接口/状态等技术细节 */
+function paymentFailureTipForWeb(raw: string): string {
+    const message = raw.trim();
+    if (/卡密/.test(message)) return '卡密不可用，已跳过提链';
+    if (/暂无支付资格|无支付资格/.test(message)) return '当前账号暂无支付资格，已跳过提链';
+    if (/未拿到支付链接/.test(message)) return '未拿到支付链接';
+    if (/支付链接生成失败/.test(message)) return '支付链接生成失败';
+    if (/未创建/.test(message)) return '支付链接创建失败';
+    if (/HTTP|网络|timeout|ETIMEDOUT|ECONN|ENOTFOUND/i.test(message)) {
+        return '支付服务暂时不可用，请稍后重试';
+    }
+    return '支付链接生成失败，请稍后重试';
+}
+
 /**
  * 当前账号单独提链；失败只告警，不抛出（不影响注册/登录成功）。
  */
@@ -216,7 +230,8 @@ export async function extractAccountPaymentLink(
         logger.info('正在查询卡密可用性…');
         const cardInfo = await queryCard(card);
         if (!cardInfo.ok || !cardInfo.exists) {
-            throw new Error(String(cardInfo.error || '卡密不可用'));
+            logger.warn('卡密不可用：%s', cardInfo.error || 'unknown');
+            throw new Error('卡密不可用');
         }
         logger.info('卡密可用，正在检查账号支付资格…');
 
@@ -229,8 +244,8 @@ export async function extractAccountPaymentLink(
             eligibility.error ? ` error=${eligibility.error}` : '',
         );
         if (!eligibility.ok) {
-            const tip = formatEligibilitySkip(eligibility);
-            logger.warn('当前账号暂无支付资格，已跳过提链：%s', tip);
+            logger.warn('当前账号暂无支付资格，已跳过提链：%s', formatEligibilitySkip(eligibility));
+            const tip = '当前账号暂无支付资格，已跳过提链';
             await onProgress(tip);
             return { error: tip };
         }
@@ -255,7 +270,7 @@ export async function extractAccountPaymentLink(
         return { link };
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        const tip = `支付链接生成失败：${message}`;
+        const tip = paymentFailureTipForWeb(message);
         logger.warn('单账号提链失败（不影响主流程）：%s', message);
         await onProgress(tip).catch(() => undefined);
         return { error: tip };

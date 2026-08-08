@@ -36,7 +36,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 
   const runName = (state.runName || '').trim();
-  if (!runName) return friendlyError(400, '任务缺少 Actions 运行名称，无法取消');
+  if (!runName) return friendlyError(400, '任务缺少运行名称，无法取消');
 
   let run = await findWorkflowRunByName(context.env, state.mode, runName);
   // dispatch 后 run 可能稍晚才出现，短重试几次
@@ -51,14 +51,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       try {
         await cancelWorkflowRun(context.env, run.id);
       } catch {
-        return friendlyError(502, '取消 Actions 失败，请稍后在 GitHub 手动取消');
+        return friendlyError(502, '取消失败，请稍后重试');
       }
     }
   }
 
   state.phase = 'cancelled';
   state.message = '任务已取消';
-  appendProgressLog(state, run ? `已取消 Actions 运行：${runName}` : `已标记取消（未找到 Actions 运行：${runName}）`);
+  appendProgressLog(state, run ? `已取消任务：${runName}` : `已标记取消（未找到运行：${runName}）`);
   for (const account of state.accounts) {
     if (account.ok === null) {
       account.ok = false;
@@ -71,7 +71,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   return json({
     ok: true,
-    message: run ? '已取消任务' : '已标记取消（Actions 运行未找到或已结束）',
+    message: run ? '已取消任务' : '已标记取消（任务未找到或已结束）',
     phase: state.phase,
   });
 };

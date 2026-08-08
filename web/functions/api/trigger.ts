@@ -72,7 +72,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       return friendlyError(400, '请选择有效的代理地区');
     }
     if (!use711Account && !proxyLinks) {
-      return friendlyError(400, '启用代理时请填写 711 账号密码，或至少一条代理链接');
+      return friendlyError(400, '启用代理时请填写代理账号密码，或至少一条代理链接');
     }
   }
 

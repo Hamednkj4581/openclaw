@@ -32,7 +32,7 @@ const PROXY_REGION_OPTIONS = [
 ];
 
 const PROXY_TYPE_OPTIONS = [
-  { value: '711', label: '711Proxy 账号（可换 sticky）' },
+  { value: '711', label: '住宅代理账号（失败可换出口）' },
   { value: 'links', label: '自定义代理链接' },
 ];
 
@@ -196,7 +196,7 @@ const HOLD_MINUTES_OPTIONS = [
 
 const PAYMENT_LINK_OPTIONS = [
   { value: '未选择', label: '未选择' },
-  { value: 'gcash', label: 'gcash' },
+  { value: 'gcash', label: 'GCash' },
 ];
 
 /** 注册/登录共用字段；模式专属字段按需使用 */
@@ -487,7 +487,7 @@ export default function App() {
     if (!taskId || !waiting) return;
     Modal.confirm({
       title: '取消当前任务？',
-      content: '将尝试取消对应的 GitHub Actions 运行，进行中的账号会中止。',
+      content: '将停止当前任务，进行中的账号会中止。',
       okText: '确认取消',
       okButtonProps: { danger: true },
       cancelText: '返回',
@@ -587,16 +587,16 @@ export default function App() {
             rules={[{ required: true, message: '请填写账号' }]}
             extra={
               mode === 'register'
-                ? '支持单邮箱、Outlook 四字段、iCloud 两字段；多账号用换行或分号分隔'
-                : '格式：email----password----2fa；第三段识别为 2FA 后忽略第四段及以后（取件链接等）'
+                ? '支持单邮箱、邮箱四字段凭据、取件两字段；多账号用换行或分号分隔'
+                : '格式：邮箱----密码----两步验证密钥；第三段识别为密钥后忽略后面字段'
             }
           >
             <TextArea
               rows={6}
               placeholder={
                 mode === 'register'
-                  ? 'email@example.com\n或 email----password----client_id----refresh_token'
-                  : 'email----password----2fa'
+                  ? '邮箱\n或 邮箱----密码----应用编号----刷新令牌'
+                  : '邮箱----密码----两步验证密钥'
               }
             />
           </Form.Item>
@@ -674,7 +674,7 @@ export default function App() {
                 label="代理方式"
                 name="proxy_type"
                 rules={[{ required: true, message: '请选择代理方式' }]}
-                extra="711 账号可在预检失败时更换 sticky session；自定义链接失败则直接报错"
+                extra="住宅代理账号在预检失败时可更换出口重试；自定义链接失败则直接报错"
               >
                 <Select
                   style={{ width: 280 }}
@@ -692,11 +692,11 @@ export default function App() {
                   label="代理链接"
                   name="proxy_links"
                   rules={[{ required: true, message: '请填写至少一条代理链接' }]}
-                  extra="每行一条；多账号按顺序轮询分配。失败不换 sticky、不重试。支持 user:pass@host:port、http://user:pass@host:port 或 host:port:user:pass"
+                  extra="每行一条；多账号按顺序轮询分配。失败不换出口、不重试"
                 >
                   <TextArea
                     rows={4}
-                    placeholder={'user:pass@global.rotgb.711proxy.com:10000\nhttp://user:pass@host:10000'}
+                    placeholder={'账号:密码@主机:端口\nhttp://账号:密码@主机:端口'}
                     autoComplete="off"
                     onBlur={() => {
                       const values = form.getFieldsValue();
@@ -715,10 +715,10 @@ export default function App() {
                     label="代理账号"
                     name="proxy_username"
                     rules={[{ required: true, message: '请填写代理账号' }]}
-                    extra="按地区保存在本浏览器；运行时拼装 711 sticky 用户名"
+                    extra="按地区保存在本浏览器"
                   >
                     <Input
-                      placeholder="711Proxy 用户名"
+                      placeholder="请输入代理账号"
                       autoComplete="off"
                       onBlur={() => {
                         const values = form.getFieldsValue();
@@ -738,7 +738,7 @@ export default function App() {
                     rules={[{ required: true, message: '请填写代理密码' }]}
                   >
                     <Input.Password
-                      placeholder="711Proxy 密码"
+                      placeholder="请输入代理密码"
                       autoComplete="off"
                       onBlur={() => {
                         const values = form.getFieldsValue();
@@ -804,16 +804,16 @@ export default function App() {
       {taskId && (
         <Card className="panel status-panel" bordered={false} title="处理进度">
           <div className="task-id-box">
-            <Text strong>任务 ID</Text>
+            <Text strong>任务编号</Text>
             <Text type="secondary" className="task-id-hint">
-              与 Actions 运行名称一致，便于排查
+              便于对照排查
             </Text>
             <Space.Compact className="token-box">
               <Input value={runName || status?.runName || '生成中…'} readOnly />
               <Button
                 icon={<CopyOutlined />}
                 disabled={!runName && !status?.runName}
-                onClick={() => void copyText(runName || status?.runName || '', '已复制任务 ID')}
+                onClick={() => void copyText(runName || status?.runName || '', '已复制任务编号')}
               >
                 复制
               </Button>
@@ -872,10 +872,10 @@ export default function App() {
                   ) : null}
                   {account.otpSecret ? (
                     <div className="cred-box">
-                      <Text strong>2FA</Text>
+                      <Text strong>两步验证密钥</Text>
                       <Space.Compact className="token-box">
                         <Input value={account.otpSecret} readOnly />
-                        <Button icon={<CopyOutlined />} onClick={() => void copyText(account.otpSecret!, '已复制 2FA')}>
+                        <Button icon={<CopyOutlined />} onClick={() => void copyText(account.otpSecret!, '已复制两步验证密钥')}>
                           复制
                         </Button>
                       </Space.Compact>
@@ -883,10 +883,10 @@ export default function App() {
                   ) : null}
                   {account.accessToken ? (
                     <div className="cred-box">
-                      <Text strong>accessToken</Text>
+                      <Text strong>访问令牌</Text>
                       <Space.Compact className="token-box">
                         <Input value={account.accessToken} readOnly />
-                        <Button icon={<CopyOutlined />} onClick={() => void copyText(account.accessToken!)}>
+                        <Button icon={<CopyOutlined />} onClick={() => void copyText(account.accessToken!, '已复制访问令牌')}>
                           复制
                         </Button>
                       </Space.Compact>

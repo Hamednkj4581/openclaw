@@ -33,3 +33,24 @@ description: 维护本仓库 GitHub PAT 的读取、校验与安全使用。在�
 - 需要时在进程内从 `PAT` 文件读取并临时使用，用完即丢弃，不落盘到其他路径。
 - 向用户报告时只说明“PAT 有效/无效/权限不足”等结论，不回显 token 内容。
 - 用户主动提供新 PAT 并要求更新时，才可改写 `PAT` 文件。
+
+## 非交互式 git 推送
+
+- 可用临时 URL（进程内拼 `https://x-access-token:<PAT>@github.com/<owner>/<repo>.git`）推送；**禁止**把含 PAT 的 URL 写入 `git remote` 持久配置。
+- PowerShell 示例（用完丢弃变量，勿打印 token）：
+
+```powershell
+$token = (Get-Content -Raw PAT).Trim()
+$env:GIT_TERMINAL_PROMPT = '0'
+git push "https://x-access-token:${token}@github.com/Hamednkj4581/openclaw.git" "HEAD:main"
+# 确认远端 tip
+git ls-remote "https://x-access-token:${token}@github.com/Hamednkj4581/openclaw.git" refs/heads/main
+# 同步跟踪分支，避免 status 假「超前」
+git fetch "https://x-access-token:${token}@github.com/Hamednkj4581/openclaw.git" main:refs/remotes/github/main
+git fetch "https://x-access-token:${token}@github.com/Hamednkj4581/openclaw.git" main:refs/remotes/origin/main
+Remove-Variable token -ErrorAction SilentlyContinue
+git status
+```
+
+- 临时 URL 推送**不会**更新 remote-tracking refs；推送后若跳过 `fetch`，`git status` 会误报 ahead。必须以 `ls-remote` + 更新后的跟踪分支为准。
+- 其余提交/推送约定见 `coding-workflow`。

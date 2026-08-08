@@ -24,3 +24,15 @@ description: 修改代码时保持实现简洁、改动最小，确保中文注�
 - 提交前检查暂存区、敏感信息和生成物，提交后确认工作区状态；推送后确认本地提交已到达对应远端分支。
 - 用户明确要求不提交或不推送、当前处于 plan 模式、仓库没有远端，或权限及外部服务阻塞时不得强行执行；应保留本地改动并明确报告阻塞原因。
 - 涉及 GitHub PAT 的非交互式推送遵守 `maintain-github-pat` skill，不得把凭据写入 remote URL、提交或日志。
+
+### 推送后必须同步跟踪分支（避免假「超前」）
+
+本环境常用临时 `https://x-access-token:…@github.com/…` URL 推送，**不会**自动更新 `refs/remotes/github/main` / `origin/main`。若只 `git push` 不 `fetch`，`git status` 会反复误报「Your branch is ahead of 'github/main'」。
+
+推送成功后必须立刻：
+
+1. 用 `git ls-remote`（或同等方式）确认远端分支 tip 等于本地 `HEAD`。
+2. `git fetch` 把对应 remote 的跟踪分支更新到该 tip（至少更新当前上游，如 `github/main`；若同时用 `origin` 也一并更新）。
+3. 再跑 `git status`，确认显示 **up to date**，不得把「假超前」当成未推送。
+
+向用户汇报时：以远端 tip / `ls-remote` 为准判断是否已推送；不要仅凭未经 fetch 的 `ahead of` 文案断定未推送。

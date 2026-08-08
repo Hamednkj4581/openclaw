@@ -23,6 +23,7 @@ import {
 } from './selectors.js';
 import { parseLoginAccount } from './loginAccount.js';
 import { buildCookieEditorJson, cookieFileNameForEmail, writeCookieEditorJson } from './cookieExport.js';
+import { extractSessionExport, writeSessionJson } from './sessionExport.js';
 import { credentialsFromLoginEnv, preflightMail, waitForMailVerification } from './mailProvider.js';
 import {
     finishAccountSuccess,
@@ -356,26 +357,6 @@ async function handleEmailVerification(
     }
 }
 
-async function extractAccessToken(page: Page): Promise<string> {
-    return Utility.waitForFunction(async () => {
-        try {
-            const data = await page.evaluate(async () => {
-                const response = await fetch('/api/auth/session', { credentials: 'include' });
-                if (!response.ok) throw new Error(`session HTTP ${response.status}`);
-                return await response.json() as Record<string, unknown>;
-            });
-            const accessToken = typeof data.accessToken === 'string' ? data.accessToken : '';
-            return accessToken || null;
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            if (/session HTTP/i.test(message)) return null;
-            throw new Error(`提取 accessToken 失败：${message}`);
-        }
-    }, { pollInterval: 500, timeout: 30_000 }).catch(() => {
-        throw new Error('已登录但未能提取 accessToken');
-    });
-}
-
 function writeAccountCookies(email: string, cookies: Awaited<ReturnType<Page['cookies']>>): void {
     const dir = process.env.ACCOUNT_COOKIE_DIR || '.';
     fs.mkdirSync(dir, { recursive: true });
@@ -543,7 +524,11 @@ function writeAccountCookies(email: string, cookies: Awaited<ReturnType<Page['co
 
         await evidence(page, 'authenticated');
         await notifyWebProgress('登录即将完成，正在保存结果…', account.email);
-        const accessToken = await extractAccessToken(page);
+        const session = await extractSessionExport(page);
+        sensitiveValues.add(session.accessToken);
+        sensitiveValues.add(session.sessionToken);
+        writeSessionJson(session);
+        const accessToken = session.accessToken;
         // GitHub 会把日志里与 Secret 重合的子串打成 ***；Base64 后再打印可避开掩码。
         const accessTokenB64 = Buffer.from(accessToken, 'utf8').toString('base64');
         fs.writeFileSync('access-token.txt', accessToken, 'utf8');
@@ -587,7 +572,9 @@ function writeAccountCookies(email: string, cookies: Awaited<ReturnType<Page['co
             return;
         }
 
-        await finishAccountSuccess(account.email, accessToken, chrome, proxy);
+        await finishAccountSuccess(account.email, accessToken, chrome, proxy, {
+            planType: session.account.planType,
+        });
     } catch (error) {
         await fail(error);
     } finally {

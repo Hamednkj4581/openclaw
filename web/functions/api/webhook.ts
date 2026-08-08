@@ -29,6 +29,7 @@ interface WebhookBody {
     phoneBindError?: string;
     error?: string;
     holdUntil?: number;
+    hint?: string;
   };
   ok?: boolean;
 }
@@ -183,6 +184,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       if (cookiesJson) {
         row.cookiesJson = cookiesJson;
         appendProgressLog(row, 'Cookie JSON 已回传');
+      }
+      const hint = (body.account?.hint || '').trim().slice(0, 160);
+      if (hint) {
+        row.hint = hint;
+        appendProgressLog(row, hint);
       }
       const paymentLink = (body.account?.paymentLink || '').trim();
       if (paymentLink) {

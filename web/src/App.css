@@ -158,6 +158,19 @@
   width: 100%;
 }
 
+.cookie-json-box {
+  align-items: flex-start;
+}
+
+.cookie-json-box .ant-input {
+  flex: 1;
+}
+
+.cookie-json-box .ant-btn {
+  height: auto;
+  align-self: stretch;
+}
+
 .hold-countdown {
   margin-top: 8px;
   color: var(--muted);

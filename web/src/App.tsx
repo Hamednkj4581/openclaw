@@ -1068,15 +1068,12 @@ export default function App() {
                   {account.cookiesJson ? (
                     <div className="cred-box">
                       <Text strong>Cookie JSON</Text>
-                      <Input.TextArea value={account.cookiesJson} readOnly autoSize={{ minRows: 3, maxRows: 8 }} />
-                      <Button
-                        size="small"
-                        icon={<CopyOutlined />}
-                        style={{ marginTop: 8 }}
-                        onClick={() => void copyText(account.cookiesJson!, '已复制 Cookie JSON')}
-                      >
-                        复制 Cookie JSON
-                      </Button>
+                      <Space.Compact className="token-box cookie-json-box">
+                        <Input.TextArea value={account.cookiesJson} readOnly autoSize={{ minRows: 3, maxRows: 8 }} />
+                        <Button icon={<CopyOutlined />} onClick={() => void copyText(account.cookiesJson!, '已复制 Cookie JSON')}>
+                          复制
+                        </Button>
+                      </Space.Compact>
                     </div>
                   ) : null}
                   {account.password ? (

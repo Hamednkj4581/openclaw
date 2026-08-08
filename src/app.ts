@@ -14,6 +14,7 @@ import { installTurnstileHook, solveCloudflareIfPresent, validateCapSolver } fro
 import { installNetworkCapture } from './networkCapture.js';
 import { buildStickyProxyFromEnv, buildProxyPacUrl, is711ProxyEnabled, preflightProxy, rotateStickySession } from './proxy.js';
 import { AUTHENTICATED_SELECTORS, CONTINUE_SELECTORS, LOGIN_SELECTORS, MFA_CHALLENGE_SELECTORS, MFA_CODE_SELECTORS, MFA_ENABLED_SELECTORS, MFA_VERIFY_SELECTORS, SIGNUP_EMAIL_SELECTORS, SIGNUP_SELECTORS } from './selectors.js';
+import { extractSessionExport, writeSessionJson } from './sessionExport.js';
 import { buildCookieEditorJson, cookieFileNameForEmail, writeCookieEditorJson } from './cookieExport.js';
 import { finishAccountSuccess, notifyWebAccountFailure, notifyWebAccountSuccess, notifyWebProgress, notifyWebSessionReady } from './hold.js';
 
@@ -376,39 +377,6 @@ async function fillProfileIfPresent(page: Page, email: string): Promise<boolean>
     return true;
 }
 
-/** 导出格式与截图一致：session 接口字段 + Cookie 中的 sessionToken */
-type SessionExport = {
-    user: { id: string; email: string };
-    expires: string;
-    account: { id: string; planType: string };
-    accessToken: string;
-    sessionToken: string;
-    authProvider: string;
-};
-
-/** 读取 next-auth session cookie；过长时会被拆成 .0/.1/... 分片，需按序号拼接 */
-function readSessionTokenFromCookies(cookies: Array<{ name: string; value: string }>): string | null {
-    const exact = cookies.find(c => c.name === '__Secure-next-auth.session-token' || c.name === 'next-auth.session-token');
-    if (exact?.value) return exact.value;
-
-    const chunkRe = /^(?:__Secure-)?next-auth\.session-token\.(\d+)$/;
-    const chunks = cookies
-        .flatMap(c => {
-            const match = c.name.match(chunkRe);
-            return match ? [{ index: Number(match[1]), value: c.value }] : [];
-        })
-        .sort((a, b) => a.index - b.index);
-    if (!chunks.length) return null;
-    const token = chunks.map(c => c.value).join('');
-    return token || null;
-}
-
-function writeSessionJson(session: SessionExport): void {
-    const filePath = process.env.ACCOUNT_SESSION_JSON_PATH || 'session.json';
-    fs.writeFileSync(filePath, JSON.stringify(session, null, 2) + '\n');
-    logger.info('已导出 session JSON：%s', filePath);
-}
-
 /** 按邮箱写出 Cookie-Editor JSON，供后续导入浏览器 */
 function writeAccountCookies(email: string, cookies: Array<{
     name: string; value: string; domain: string; path?: string;
@@ -420,49 +388,6 @@ function writeAccountCookies(email: string, cookies: Array<{
     const count = writeCookieEditorJson(filePath, cookies);
     logger.info('已导出 Cookie-Editor JSON：%s（%s 条）', filePath, count);
     return filePath;
-}
-
-async function extractSessionExport(page: Page): Promise<SessionExport> {
-    return Utility.waitForFunction(async () => {
-        try {
-            const data = await page.evaluate(async () => {
-                const response = await fetch('/api/auth/session', { credentials: 'include' });
-                if (!response.ok)
-                    throw new Error(`session HTTP ${response.status}`);
-                return await response.json() as Record<string, unknown>;
-            });
-            const accessToken = typeof data.accessToken === 'string' ? data.accessToken : '';
-            if (!accessToken) return null;
-
-            const user = data.user && typeof data.user === 'object' ? data.user as Record<string, unknown> : undefined;
-            const account = data.account && typeof data.account === 'object' ? data.account as Record<string, unknown> : undefined;
-            const userId = typeof user?.id === 'string' ? user.id : '';
-            const userEmail = typeof user?.email === 'string' ? user.email : '';
-            const expires = typeof data.expires === 'string' ? data.expires : '';
-            const accountId = typeof account?.id === 'string' ? account.id : '';
-            const planType = typeof account?.planType === 'string' ? account.planType : '';
-            const authProvider = typeof data.authProvider === 'string' && data.authProvider ? data.authProvider : 'openai';
-            if (!userId || !userEmail || !expires || !accountId || !planType) return null;
-
-            const sessionToken = readSessionTokenFromCookies(await page.cookies());
-            if (!sessionToken) return null;
-
-            return {
-                user: { id: userId, email: userEmail },
-                expires,
-                account: { id: accountId, planType },
-                accessToken,
-                sessionToken,
-                authProvider,
-            };
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            if (/session HTTP/i.test(message)) return null;
-            throw new Error(`提取 ChatGPT session 失败：${message}`);
-        }
-    }, { pollInterval: 500, timeout: 30_000 }).catch(() => {
-        throw new Error('已登录但未能导出完整 session JSON（accessToken/sessionToken）');
-    });
 }
 
 /** 不要求可见：You're all set 弹层常带 aria-hidden，isVisible 会误判为不存在。 */
@@ -825,6 +750,7 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
 
         await finishAccountSuccess(email, session.accessToken, chrome, proxy, {
             password: chatGptPassword,
+            planType: session.account.planType,
             ...(otpSecret ? { otpSecret } : {}),
         });
     } catch (error) {

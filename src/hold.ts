@@ -5,6 +5,7 @@ import logger from './logger.js';
 import { submitPaymentQrToGcPh, isGcPhEnabled } from './gcPhOrder.js';
 import { extractAccountPaymentLink, isPaymentLinkEnabled } from './paymentLink.js';
 import { capturePaymentQr, type ProxyAuth } from './paymentQr.js';
+import { isChatGptPlusPlan } from './sessionExport.js';
 
 const ALLOWED_HOLD_MINUTES = new Set([0, 5, 10, 15, 30]);
 /** 进度文案上限（需容纳提链失败原因） */
@@ -100,6 +101,7 @@ export async function notifyWebAccountSuccess(
         paymentError?: string;
         phoneNumber?: string;
         phoneBindError?: string;
+        hint?: string;
     }
 ): Promise<void> {
     const config = webCallbackConfig();
@@ -113,6 +115,7 @@ export async function notifyWebAccountSuccess(
     const phoneNumber = options?.phoneNumber?.trim();
     const phoneBindError = options?.phoneBindError?.trim().slice(0, WEB_PROGRESS_MAX);
     const cookiesJson = options?.cookiesJson?.trim();
+    const hint = options?.hint?.trim().slice(0, WEB_PROGRESS_MAX);
     if (process.env.GITHUB_ACTIONS === 'true') {
         if (password) console.log(`::add-mask::${password}`);
         if (otpSecret) console.log(`::add-mask::${otpSecret}`);
@@ -134,6 +137,7 @@ export async function notifyWebAccountSuccess(
             ...(paymentError ? { paymentError } : {}),
             ...(phoneNumber ? { phoneNumber } : {}),
             ...(phoneBindError ? { phoneBindError } : {}),
+            ...(hint ? { hint } : {}),
         },
     });
 }
@@ -188,10 +192,24 @@ export async function finishAccountSuccess(
     accessToken: string,
     browser?: Browser | null,
     proxyAuth?: ProxyAuth | null,
-    credentials?: { password?: string; otpSecret?: string },
+    credentials?: { password?: string; otpSecret?: string; planType?: string },
 ): Promise<void> {
     const password = credentials?.password?.trim();
     const otpSecret = credentials?.otpSecret?.trim();
+    const planType = credentials?.planType?.trim();
+
+    if (isChatGptPlusPlan(planType)) {
+        const plusHint = '该账号已是 ChatGPT Plus，已跳过提链';
+        logger.info('%s，直接结束', plusHint);
+        await notifyWebProgress(plusHint, email).catch(() => undefined);
+        await notifyWebAccountSuccess(email, accessToken, {
+            ...(password ? { password } : {}),
+            ...(otpSecret ? { otpSecret } : {}),
+            hint: plusHint,
+        });
+        await notifyWebProgress('即将关闭…', email).catch(() => undefined);
+        return;
+    }
 
     logger.info('登录/注册已成功，进入提链阶段（提链不占用保持时长）');
     if (isPaymentLinkEnabled()) {

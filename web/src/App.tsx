@@ -31,11 +31,23 @@ const PROXY_REGION_OPTIONS = [
   { value: 'PH', label: '菲律宾' },
 ];
 
-const PROXY_STORAGE_KEY = 'gpt-web-console.proxy.v2';
+const PROXY_TYPE_OPTIONS = [
+  { value: '711', label: '711Proxy 账号（可换 sticky）' },
+  { value: 'links', label: '自定义代理链接' },
+];
+
+const PROXY_STORAGE_KEY = 'gpt-web-console.proxy.v3';
+const PROXY_STORAGE_KEY_V2 = 'gpt-web-console.proxy.v2';
 const SETTINGS_STORAGE_KEY = 'gpt-web-console.settings.v1';
 
+type ProxyType = '711' | 'links';
+type ProxyCreds = { username: string; password: string };
 type ProxyStore = {
   region: string;
+  /** 各地区代理方式 */
+  typeByRegion: Record<string, ProxyType>;
+  /** 711 账号密码（按地区） */
+  credentials: Record<string, ProxyCreds>;
   /** 各地区代理链接文本（多行） */
   linksByRegion: Record<string, string>;
 };
@@ -59,19 +71,64 @@ const DEFAULT_SETTINGS: PersistedSettings = {
   payment_card: '',
 };
 
+function emptyProxyStore(region = 'JP'): ProxyStore {
+  return { region, typeByRegion: {}, credentials: {}, linksByRegion: {} };
+}
+
+function normalizeProxyType(value: unknown): ProxyType {
+  return value === 'links' ? 'links' : '711';
+}
+
 function readProxyStore(): ProxyStore {
   try {
     const raw = localStorage.getItem(PROXY_STORAGE_KEY);
-    if (!raw) return { region: 'JP', linksByRegion: {} };
-    const parsed = JSON.parse(raw) as ProxyStore;
-    if (!parsed || typeof parsed !== 'object') return { region: 'JP', linksByRegion: {} };
-    return {
-      region: typeof parsed.region === 'string' && parsed.region ? parsed.region : 'JP',
-      linksByRegion:
-        parsed.linksByRegion && typeof parsed.linksByRegion === 'object' ? parsed.linksByRegion : {},
-    };
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<ProxyStore>;
+      if (!parsed || typeof parsed !== 'object') return emptyProxyStore();
+      const typeByRegion: Record<string, ProxyType> = {};
+      if (parsed.typeByRegion && typeof parsed.typeByRegion === 'object') {
+        for (const [key, value] of Object.entries(parsed.typeByRegion)) {
+          typeByRegion[key] = normalizeProxyType(value);
+        }
+      }
+      const credentials: Record<string, ProxyCreds> = {};
+      if (parsed.credentials && typeof parsed.credentials === 'object') {
+        for (const [key, value] of Object.entries(parsed.credentials)) {
+          if (!value || typeof value !== 'object') continue;
+          credentials[key] = {
+            username: typeof value.username === 'string' ? value.username : '',
+            password: typeof value.password === 'string' ? value.password : '',
+          };
+        }
+      }
+      return {
+        region: typeof parsed.region === 'string' && parsed.region ? parsed.region : 'JP',
+        typeByRegion,
+        credentials,
+        linksByRegion:
+          parsed.linksByRegion && typeof parsed.linksByRegion === 'object' ? parsed.linksByRegion : {},
+      };
+    }
+
+    // 兼容 v2：仅有 linksByRegion
+    const legacyRaw = localStorage.getItem(PROXY_STORAGE_KEY_V2);
+    if (!legacyRaw) return emptyProxyStore();
+    const legacy = JSON.parse(legacyRaw) as { region?: string; linksByRegion?: Record<string, string> };
+    const linksByRegion =
+      legacy.linksByRegion && typeof legacy.linksByRegion === 'object' ? legacy.linksByRegion : {};
+    const typeByRegion: Record<string, ProxyType> = {};
+    for (const region of Object.keys(linksByRegion)) {
+      if ((linksByRegion[region] || '').trim()) typeByRegion[region] = 'links';
+    }
+    const migrated = emptyProxyStore(
+      typeof legacy.region === 'string' && legacy.region ? legacy.region : 'JP',
+    );
+    migrated.linksByRegion = linksByRegion;
+    migrated.typeByRegion = typeByRegion;
+    writeProxyStore(migrated);
+    return migrated;
   } catch {
-    return { region: 'JP', linksByRegion: {} };
+    return emptyProxyStore();
   }
 }
 
@@ -79,11 +136,22 @@ function writeProxyStore(store: ProxyStore): void {
   localStorage.setItem(PROXY_STORAGE_KEY, JSON.stringify(store));
 }
 
-function saveProxyRegionLinks(region: string, links: string): void {
+function saveProxyRegionState(
+  region: string,
+  patch: { type?: ProxyType; username?: string; password?: string; links?: string },
+): void {
   if (!region || region === 'none') return;
   const store = readProxyStore();
   store.region = region;
-  store.linksByRegion[region] = links;
+  if (patch.type) store.typeByRegion[region] = patch.type;
+  if (patch.username !== undefined || patch.password !== undefined) {
+    const prev = store.credentials[region] || { username: '', password: '' };
+    store.credentials[region] = {
+      username: patch.username !== undefined ? patch.username.trim() : prev.username,
+      password: patch.password !== undefined ? patch.password : prev.password,
+    };
+  }
+  if (patch.links !== undefined) store.linksByRegion[region] = patch.links;
   writeProxyStore(store);
 }
 
@@ -137,6 +205,9 @@ interface TaskFormValues {
   forwarding_emails: string;
   enable_mfa: boolean;
   proxy_region: string;
+  proxy_type: ProxyType;
+  proxy_username: string;
+  proxy_password: string;
   proxy_links: string;
   hold_minutes: number;
   payment_link_type: string;
@@ -162,7 +233,12 @@ function persistFormSettings(values: Partial<TaskFormValues>, mode: TaskMode): v
     ...(typeof values.payment_card === 'string' ? { payment_card: values.payment_card } : {}),
   });
   if (isProxyEnabled(values.proxy_region)) {
-    saveProxyRegionLinks(values.proxy_region!, values.proxy_links || '');
+    saveProxyRegionState(values.proxy_region!, {
+      type: values.proxy_type === 'links' ? 'links' : '711',
+      username: values.proxy_username || '',
+      password: values.proxy_password || '',
+      links: values.proxy_links || '',
+    });
   } else if (values.proxy_region === 'none') {
     const store = readProxyStore();
     store.region = 'none';
@@ -271,6 +347,7 @@ export default function App() {
   const [form] = Form.useForm<TaskFormValues>();
   const paymentLinkType = Form.useWatch('payment_link_type', form);
   const proxyRegion = Form.useWatch('proxy_region', form);
+  const proxyType = Form.useWatch('proxy_type', form);
   const proxyRegionRef = useRef(proxyRegion);
 
   useEffect(() => {
@@ -284,6 +361,11 @@ export default function App() {
     const resolvedRegion = PROXY_REGION_OPTIONS.some((item) => item.value === store.region)
       ? store.region
       : 'JP';
+    const resolvedType =
+      resolvedRegion === 'none'
+        ? '711'
+        : normalizeProxyType(store.typeByRegion[resolvedRegion] || (store.linksByRegion[resolvedRegion] ? 'links' : '711'));
+    const creds = store.credentials[resolvedRegion] || { username: '', password: '' };
     form.setFieldsValue({
       forwarding_emails: settings.forwarding_emails,
       enable_mfa: settings.enable_mfa,
@@ -291,6 +373,9 @@ export default function App() {
       payment_link_type: settings.payment_link_type,
       payment_card: settings.payment_card,
       proxy_region: resolvedRegion,
+      proxy_type: resolvedType,
+      proxy_username: resolvedRegion === 'none' ? '' : creds.username || '',
+      proxy_password: resolvedRegion === 'none' ? '' : creds.password || '',
       proxy_links: resolvedRegion === 'none' ? '' : store.linksByRegion[resolvedRegion] || '',
     });
     proxyRegionRef.current = resolvedRegion;
@@ -355,11 +440,15 @@ export default function App() {
     setSubmitting(true);
     try {
       persistFormSettings(values, mode);
+      const proxyEnabled = isProxyEnabled(values.proxy_region);
+      const use711 = proxyEnabled && values.proxy_type !== 'links';
       const shared = {
         accounts: values.accounts,
-        enable_711_proxy: isProxyEnabled(values.proxy_region),
-        proxy_region: isProxyEnabled(values.proxy_region) ? values.proxy_region : '',
-        proxy_links: isProxyEnabled(values.proxy_region) ? (values.proxy_links || '').trim() : '',
+        enable_711_proxy: proxyEnabled,
+        proxy_region: proxyEnabled ? values.proxy_region : '',
+        proxy_username: use711 ? (values.proxy_username || '').trim() : '',
+        proxy_password: use711 ? values.proxy_password || '' : '',
+        proxy_links: proxyEnabled && !use711 ? (values.proxy_links || '').trim() : '',
         payment_link_type: values.payment_link_type,
         payment_card: values.payment_card,
         hold_minutes: [0, 5, 10, 15, 30].includes(Number(values.hold_minutes))
@@ -478,6 +567,9 @@ export default function App() {
             forwarding_emails: savedSettings.forwarding_emails,
             enable_mfa: savedSettings.enable_mfa,
             proxy_region: 'JP',
+            proxy_type: '711',
+            proxy_username: '',
+            proxy_password: '',
             proxy_links: '',
             hold_minutes: savedSettings.hold_minutes,
             payment_link_type: savedSettings.payment_link_type,
@@ -537,10 +629,20 @@ export default function App() {
                   const current = form.getFieldsValue();
                   const prevRegion = proxyRegionRef.current;
                   if (prevRegion && prevRegion !== 'none') {
-                    saveProxyRegionLinks(prevRegion, current.proxy_links || '');
+                    saveProxyRegionState(prevRegion, {
+                      type: current.proxy_type === 'links' ? 'links' : '711',
+                      username: current.proxy_username || '',
+                      password: current.proxy_password || '',
+                      links: current.proxy_links || '',
+                    });
                   }
                   if (!nextRegion || nextRegion === 'none') {
-                    form.setFieldsValue({ proxy_links: '' });
+                    form.setFieldsValue({
+                      proxy_type: '711',
+                      proxy_username: '',
+                      proxy_password: '',
+                      proxy_links: '',
+                    });
                     const store = readProxyStore();
                     store.region = 'none';
                     writeProxyStore(store);
@@ -550,7 +652,14 @@ export default function App() {
                   const store = readProxyStore();
                   store.region = nextRegion;
                   writeProxyStore(store);
+                  const nextType = normalizeProxyType(
+                    store.typeByRegion[nextRegion] || (store.linksByRegion[nextRegion] ? 'links' : '711'),
+                  );
+                  const creds = store.credentials[nextRegion] || { username: '', password: '' };
                   form.setFieldsValue({
+                    proxy_type: nextType,
+                    proxy_username: creds.username || '',
+                    proxy_password: creds.password || '',
                     proxy_links: store.linksByRegion[nextRegion] || '',
                   });
                   proxyRegionRef.current = nextRegion;
@@ -560,24 +669,92 @@ export default function App() {
           </Space>
 
           {isProxyEnabled(proxyRegion) ? (
-            <Form.Item
-              label="代理链接"
-              name="proxy_links"
-              rules={[{ required: true, message: '请填写至少一条代理链接' }]}
-              extra="每行一条；多账号按顺序轮询分配（例如 5 个账号、3 条链接 → 1,2,3,1,2）。支持 user:pass@host:port、http://user:pass@host:port 或 host:port:user:pass"
-            >
-              <TextArea
-                rows={4}
-                placeholder={'user:pass@global.rotgb.711proxy.com:10000\nhttp://user:pass@host:10000'}
-                autoComplete="off"
-                onBlur={() => {
-                  const values = form.getFieldsValue();
-                  if (isProxyEnabled(values.proxy_region)) {
-                    saveProxyRegionLinks(values.proxy_region, values.proxy_links || '');
-                  }
-                }}
-              />
-            </Form.Item>
+            <>
+              <Form.Item
+                label="代理方式"
+                name="proxy_type"
+                rules={[{ required: true, message: '请选择代理方式' }]}
+                extra="711 账号可在预检失败时更换 sticky session；自定义链接失败则直接报错"
+              >
+                <Select
+                  style={{ width: 280 }}
+                  options={PROXY_TYPE_OPTIONS}
+                  onChange={(nextType: ProxyType) => {
+                    const values = form.getFieldsValue();
+                    if (isProxyEnabled(values.proxy_region)) {
+                      saveProxyRegionState(values.proxy_region, { type: nextType });
+                    }
+                  }}
+                />
+              </Form.Item>
+              {proxyType === 'links' ? (
+                <Form.Item
+                  label="代理链接"
+                  name="proxy_links"
+                  rules={[{ required: true, message: '请填写至少一条代理链接' }]}
+                  extra="每行一条；多账号按顺序轮询分配。失败不换 sticky、不重试。支持 user:pass@host:port、http://user:pass@host:port 或 host:port:user:pass"
+                >
+                  <TextArea
+                    rows={4}
+                    placeholder={'user:pass@global.rotgb.711proxy.com:10000\nhttp://user:pass@host:10000'}
+                    autoComplete="off"
+                    onBlur={() => {
+                      const values = form.getFieldsValue();
+                      if (isProxyEnabled(values.proxy_region)) {
+                        saveProxyRegionState(values.proxy_region, {
+                          type: 'links',
+                          links: values.proxy_links || '',
+                        });
+                      }
+                    }}
+                  />
+                </Form.Item>
+              ) : (
+                <>
+                  <Form.Item
+                    label="代理账号"
+                    name="proxy_username"
+                    rules={[{ required: true, message: '请填写代理账号' }]}
+                    extra="按地区保存在本浏览器；运行时拼装 711 sticky 用户名"
+                  >
+                    <Input
+                      placeholder="711Proxy 用户名"
+                      autoComplete="off"
+                      onBlur={() => {
+                        const values = form.getFieldsValue();
+                        if (isProxyEnabled(values.proxy_region)) {
+                          saveProxyRegionState(values.proxy_region, {
+                            type: '711',
+                            username: values.proxy_username || '',
+                            password: values.proxy_password || '',
+                          });
+                        }
+                      }}
+                    />
+                  </Form.Item>
+                  <Form.Item
+                    label="代理密码"
+                    name="proxy_password"
+                    rules={[{ required: true, message: '请填写代理密码' }]}
+                  >
+                    <Input.Password
+                      placeholder="711Proxy 密码"
+                      autoComplete="off"
+                      onBlur={() => {
+                        const values = form.getFieldsValue();
+                        if (isProxyEnabled(values.proxy_region)) {
+                          saveProxyRegionState(values.proxy_region, {
+                            type: '711',
+                            username: values.proxy_username || '',
+                            password: values.proxy_password || '',
+                          });
+                        }
+                      }}
+                    />
+                  </Form.Item>
+                </>
+              )}
+            </>
           ) : null}
 
           <Form.Item label="支付提链" name="payment_link_type">

@@ -637,8 +637,8 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
         for (let attempt = 1; attempt <= MAX_OPEN_CHATGPT_ATTEMPTS; attempt++) {
             if (proxy) {
                 await preflightProxy(proxy);
-                logger.info('代理预检通过：%s link=#%s session=%s（仅测 api.chatgpt.com/v1；PAC：静态资源直连，其余走代理）',
-                    proxy.server, proxy.linkIndex + 1, proxy.session);
+                logger.info('代理预检通过：%s link=#%s session=%s sticky=%s（仅测 api.chatgpt.com/v1；PAC：静态资源直连，其余走代理）',
+                    proxy.server, proxy.linkIndex + 1, proxy.session, proxy.stickyRotate);
             }
             chrome = await puppeteer.launch({
                 headless: os.platform() === 'linux',
@@ -681,7 +681,7 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
             await chrome.close().catch(() => undefined);
             chrome = undefined;
             if (attempt >= MAX_OPEN_CHATGPT_ATTEMPTS) throw new Error(navError);
-            if (proxy) rotateStickySession(proxy);
+            if (proxy?.stickyRotate) rotateStickySession(proxy);
         }
         await evidence(page, 'chatgpt-opened');
         await notifyWebProgress('正在打开注册页面…', email);

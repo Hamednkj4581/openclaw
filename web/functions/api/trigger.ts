@@ -21,8 +21,6 @@ interface TriggerBody {
   enable_mfa?: boolean;
   enable_711_proxy?: boolean;
   proxy_region?: string;
-  proxy_username?: string;
-  proxy_password?: string;
   proxy_links?: string;
   payment_link_type?: string;
   payment_card?: string;
@@ -133,16 +131,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const enableProxy =
     body.enable_711_proxy === true || (proxyRegionRaw !== '' && proxyRegionRaw !== 'NONE');
   const proxyRegion = enableProxy ? proxyRegionRaw : '';
-  const proxyUsername = (body.proxy_username || '').trim();
-  const proxyPassword = (body.proxy_password || '').trim();
   const proxyLinks = parseProxyLinks(body.proxy_links || '').join('\n');
-  const use711Account = Boolean(proxyUsername && proxyPassword);
   if (enableProxy) {
     if (!PROXY_REGIONS.has(proxyRegion)) {
       return friendlyError(400, '请选择有效的代理地区');
     }
-    if (!use711Account && !proxyLinks) {
-      return friendlyError(400, '启用代理时请填写 711 账号密码，或至少一条代理链接');
+    if (!proxyLinks) {
+      return friendlyError(400, '启用代理时请填写至少一条代理链接');
     }
   }
 
@@ -178,9 +173,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     web_task_id: taskId,
     enable_711_proxy: String(enableProxy),
     proxy_region: proxyRegion,
-    proxy_username: enableProxy && use711Account ? proxyUsername : '',
-    proxy_password: enableProxy && use711Account ? proxyPassword : '',
-    proxy_links: enableProxy && !use711Account ? proxyLinks : '',
+    proxy_links: enableProxy ? proxyLinks : '',
     payment_link_type: paymentLinkType,
     payment_card: paymentLinkType === 'gcash' ? paymentCard : '',
     gc_ph_api_key: gcPhApiKey,

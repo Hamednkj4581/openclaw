@@ -27,7 +27,7 @@ on:
         default: true
         type: boolean
       enable_711_proxy:
-        description: '启用 711Proxy 住宅代理'
+        description: '启用住宅代理（关闭则直连）'
         required: false
         default: false
         type: boolean
@@ -36,18 +36,8 @@ on:
         required: false
         default: ''
         type: string
-      proxy_username:
-        description: '711Proxy 账号（与密码一起时走 sticky 拼装）'
-        required: false
-        default: ''
-        type: string
-      proxy_password:
-        description: '711Proxy 密码'
-        required: false
-        default: ''
-        type: string
       proxy_links:
-        description: '代理链接列表（每行一条；多账号按序号轮询；失败不换 sticky）'
+        description: '代理链接列表（每行一条；多账号按序号轮询）'
         required: false
         default: ''
         type: string
@@ -283,12 +273,6 @@ jobs:
           WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
           WEB_ACCOUNT_INDEX: ${{ matrix.account_index }}
           CAPSOLVER_API_KEY: ${{ secrets.CAPSOLVER_API_KEY }}
-          PROXY_USERNAME: ${{ inputs.proxy_username }}
-          PROXY_PASSWORD: ${{ inputs.proxy_password }}
-          PROXY_HOST: us.rotgb.711proxy.com
-          PROXY_PORT: '10000'
-          PROXY_REGION: ${{ inputs.proxy_region }}
-          PROXY_SESS_TIME: '30'
           PROXY_LINKS: ${{ inputs.proxy_links }}
           ACCOUNT_RESULT_PATH: step-summary
           ACCOUNT_SESSION_JSON_PATH: session.json
@@ -299,9 +283,7 @@ jobs:
           npm install
           hold="${{ inputs.hold_minutes }}"
           mode="${{ inputs.mode }}"
-          # 掩码客户端传入的代理凭据/链接/通道密钥，避免出现在日志
-          if [ -n "${PROXY_USERNAME}" ]; then echo "::add-mask::${PROXY_USERNAME}"; fi
-          if [ -n "${PROXY_PASSWORD}" ]; then echo "::add-mask::${PROXY_PASSWORD}"; fi
+          # 掩码客户端传入的代理链接/通道密钥，避免出现在日志
           if [ -n "${GC_PH_API_KEY}" ]; then echo "::add-mask::${GC_PH_API_KEY}"; fi
           if [ -n "${HERO_SMS_API_KEY}" ]; then echo "::add-mask::${HERO_SMS_API_KEY}"; fi
           if [ -n "${PROXY_LINKS}" ]; then

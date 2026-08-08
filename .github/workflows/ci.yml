@@ -22,7 +22,7 @@ on:
         default: true
         type: boolean
       enable_711_proxy:
-        description: '启用 711Proxy 住宅代理（关闭则直连）'
+        description: '启用住宅代理（关闭则直连）'
         required: false
         default: false
         type: boolean
@@ -31,18 +31,8 @@ on:
         required: false
         default: ''
         type: string
-      proxy_username:
-        description: '711Proxy 账号（与密码一起时走 sticky 拼装）'
-        required: false
-        default: ''
-        type: string
-      proxy_password:
-        description: '711Proxy 密码'
-        required: false
-        default: ''
-        type: string
       proxy_links:
-        description: '代理链接列表（每行一条；多账号按序号轮询；失败不换 sticky）'
+        description: '代理链接列表（每行一条；多账号按序号轮询）'
         required: false
         default: ''
         type: string
@@ -98,8 +88,6 @@ jobs:
       enable_mfa: ${{ inputs.enable_mfa }}
       enable_711_proxy: ${{ inputs.enable_711_proxy }}
       proxy_region: ${{ inputs.proxy_region }}
-      proxy_username: ${{ inputs.proxy_username }}
-      proxy_password: ${{ inputs.proxy_password }}
       proxy_links: ${{ inputs.proxy_links }}
       hold_minutes: ${{ inputs.hold_minutes }}
       payment_link_type: ${{ inputs.payment_link_type }}

@@ -10,7 +10,7 @@ import logger from './logger.js';
 import githubAnnotation from './annotations.js';
 import { installTurnstileHook, solveCloudflareIfPresent, validateCapSolver } from './capsolver.js';
 import { installNetworkCapture } from './networkCapture.js';
-import { buildStickyProxyFromEnv, buildProxyPacUrl, is711ProxyEnabled, preflightProxy, rotateStickySession } from './proxy.js';
+import { buildStickyProxyFromEnv, buildProxyPacUrl, is711ProxyEnabled, preflightProxy } from './proxy.js';
 import {
     AUTHENTICATED_SELECTORS,
     CONTINUE_SELECTORS,
@@ -419,8 +419,8 @@ function writeAccountCookies(email: string, cookies: Awaited<ReturnType<Page['co
         for (let attempt = 1; attempt <= MAX_OPEN_CHATGPT_ATTEMPTS; attempt++) {
             if (proxy) {
                 await preflightProxy(proxy);
-                logger.info('代理预检通过：%s link=#%s session=%s sticky=%s',
-                    proxy.server, proxy.linkIndex + 1, proxy.session, proxy.stickyRotate);
+                logger.info('代理预检通过：%s link=#%s session=%s',
+                    proxy.server, proxy.linkIndex + 1, proxy.session);
             }
             chrome = await puppeteer.launch({
                 headless: os.platform() === 'linux',
@@ -453,7 +453,6 @@ function writeAccountCookies(email: string, cookies: Awaited<ReturnType<Page['co
             await chrome.close().catch(() => undefined);
             chrome = undefined;
             if (attempt >= MAX_OPEN_CHATGPT_ATTEMPTS) throw new Error(navError);
-            if (proxy?.stickyRotate) rotateStickySession(proxy);
         }
 
         await evidence(page, 'chatgpt-opened');

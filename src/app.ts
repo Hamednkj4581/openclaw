@@ -12,7 +12,7 @@ import githubAnnotation from './annotations.js';
 import { credentialsFromEnv, preflightMail, waitForMailVerification } from './mailProvider.js';
 import { installTurnstileHook, solveCloudflareIfPresent, validateCapSolver } from './capsolver.js';
 import { installNetworkCapture } from './networkCapture.js';
-import { buildStickyProxyFromEnv, buildProxyPacUrl, is711ProxyEnabled, preflightProxy, rotateStickySession } from './proxy.js';
+import { buildStickyProxyFromEnv, buildProxyPacUrl, is711ProxyEnabled, preflightProxy } from './proxy.js';
 import { AUTHENTICATED_SELECTORS, CONTINUE_SELECTORS, LOGIN_SELECTORS, MFA_CHALLENGE_SELECTORS, MFA_CODE_SELECTORS, MFA_ENABLED_SELECTORS, MFA_VERIFY_SELECTORS, SIGNUP_EMAIL_SELECTORS, SIGNUP_SELECTORS } from './selectors.js';
 import { extractSessionExport, writeSessionJson } from './sessionExport.js';
 import { buildCookieEditorJson, cookieFileNameForEmail, writeCookieEditorJson } from './cookieExport.js';
@@ -290,7 +290,7 @@ async function chromeNavigationFailure(page: Page): Promise<string | null> {
         ?? '';
     const target = targetRaw.replace(/&amp;/g, '&').replace(/[?#].*$/, '');
     if (/ERR_TUNNEL_CONNECTION_FAILED/i.test(code))
-        return `代理隧道连接失败（${code}）：无法打开 ${target || '目标站点'}，页面已落到 chrome-error。这通常是 711Proxy 不稳定，不是注册选择器或 Protocol error。`;
+        return `代理隧道连接失败（${code}）：无法打开 ${target || '目标站点'}，页面已落到 chrome-error。这通常是代理不稳定，不是注册选择器或 Protocol error。`;
     return `浏览器导航失败（${code}）：无法打开 ${target || '目标站点'}，页面已落到 chrome-error。请检查代理/网络。`;
 }
 
@@ -562,8 +562,8 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
         for (let attempt = 1; attempt <= MAX_OPEN_CHATGPT_ATTEMPTS; attempt++) {
             if (proxy) {
                 await preflightProxy(proxy);
-                logger.info('代理预检通过：%s link=#%s session=%s sticky=%s（仅测 api.chatgpt.com/v1；PAC：静态资源直连，其余走代理）',
-                    proxy.server, proxy.linkIndex + 1, proxy.session, proxy.stickyRotate);
+                logger.info('代理预检通过：%s link=#%s session=%s（仅测 api.chatgpt.com/v1；PAC：静态资源直连，其余走代理）',
+                    proxy.server, proxy.linkIndex + 1, proxy.session);
             }
             chrome = await puppeteer.launch({
                 headless: os.platform() === 'linux',
@@ -606,7 +606,6 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
             await chrome.close().catch(() => undefined);
             chrome = undefined;
             if (attempt >= MAX_OPEN_CHATGPT_ATTEMPTS) throw new Error(navError);
-            if (proxy?.stickyRotate) rotateStickySession(proxy);
         }
         await evidence(page, 'chatgpt-opened');
         await notifyWebProgress('正在打开注册页面…', email);

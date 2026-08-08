@@ -1,6 +1,13 @@
 export type TaskMode = 'register' | 'login';
 export type TaskPhase = 'submitted' | 'processing' | 'done' | 'failed';
 
+/** 账号进度时间线条目 */
+export interface ProgressLogEntry {
+  /** epoch ms */
+  at: number;
+  message: string;
+}
+
 export interface AccountResult {
   index: number;
   email: string;
@@ -20,6 +27,8 @@ export interface AccountResult {
   paymentQrUrl?: string;
   /** 登录保持结束时间（epoch ms），有值时前端显示倒计时 */
   holdUntil?: number;
+  /** 按时间排列的进度详情（点击展开） */
+  logs?: ProgressLogEntry[];
 }
 
 export interface TaskState {
@@ -31,6 +40,8 @@ export interface TaskState {
   /** @deprecated 提链已改为账号级 paymentLink */
   paymentLinks?: string[];
   paymentMessage?: string;
+  /** 任务级时间线（无账号序号的全局事件） */
+  logs?: ProgressLogEntry[];
   createdAt: number;
   updatedAt: number;
 }
@@ -45,6 +56,26 @@ export interface Env {
 }
 
 export const TASK_TTL_SECONDS = 60 * 60 * 24;
+const MAX_PROGRESS_LOGS = 100;
+const LOG_MESSAGE_MAX = 160;
+
+/** 追加一条进度日志；同秒同文案去重，超出上限丢弃最早条目 */
+export function appendProgressLog(
+  target: { logs?: ProgressLogEntry[] },
+  message: string,
+  at = Date.now(),
+): void {
+  const text = message.trim().slice(0, LOG_MESSAGE_MAX);
+  if (!text) return;
+  const logs = target.logs ? [...target.logs] : [];
+  const last = logs[logs.length - 1];
+  if (last && last.message === text && Math.abs(at - last.at) < 1000) return;
+  logs.push({ at, message: text });
+  if (logs.length > MAX_PROGRESS_LOGS) {
+    logs.splice(0, logs.length - MAX_PROGRESS_LOGS);
+  }
+  target.logs = logs;
+}
 
 export function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {

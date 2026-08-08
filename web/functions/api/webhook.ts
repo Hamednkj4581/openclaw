@@ -1,5 +1,5 @@
 import type { AccountResult, Env, TaskState } from '../_shared/types';
-import { friendlyError, json } from '../_shared/types';
+import { appendProgressLog, friendlyError, json } from '../_shared/types';
 import { readTask, writeTask } from '../_shared/tasks';
 
 interface WebhookBody {
@@ -58,13 +58,18 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     state.total = total;
     state.phase = 'processing';
     state.message = total > 0 ? `已开始处理（共 ${total} 个账号），请耐心等待…` : '已开始处理，请耐心等待…';
+    appendProgressLog(state, state.message);
     if (total > 0 && state.accounts.length === 0) {
-      state.accounts = Array.from({ length: total }, (_, index) => ({
-        index,
-        email: `账号 ${index + 1}`,
-        ok: null,
-        hint: '排队中…',
-      }));
+      state.accounts = Array.from({ length: total }, (_, index) => {
+        const row: AccountResult = {
+          index,
+          email: `账号 ${index + 1}`,
+          ok: null,
+          hint: '排队中…',
+        };
+        appendProgressLog(row, '排队中…');
+        return row;
+      });
     }
   } else if (body.event === 'progress') {
     const tip = (body.message || '').trim().slice(0, 160);
@@ -74,13 +79,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     if (Number.isInteger(index) && index >= 0) {
       const email = (body.account?.email || '').trim() || `账号 ${index + 1}`;
       const row = ensureAccountSlot(state, index, email);
-      // 未结束，或已成功但仍在补提链时，更新账号提示
-      if (row.ok === null || (row.ok === true && !row.paymentLink)) {
+      appendProgressLog(row, tip);
+      // 进行中或成功后的后续阶段（提链/保持）都更新最新提示
+      if (row.ok === null || row.ok === true) {
         row.hint = tip;
       }
       const total = state.total || state.accounts.length || 0;
       state.message = total > 1 ? `账号 ${index + 1}/${total}：${tip}` : tip;
     } else {
+      appendProgressLog(state, tip);
       state.message = tip;
     }
   } else if (body.event === 'account_done') {
@@ -88,6 +95,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     if (!Number.isInteger(index) || index < 0) return friendlyError(400, '账号序号无效');
     const email = (body.account?.email || '').trim() || `账号 ${index + 1}`;
     const row = ensureAccountSlot(state, index, email);
+    const prevOk = row.ok;
+    const prevLink = row.paymentLink || '';
+    const prevQr = row.paymentQr || '';
+    const prevHold = row.holdUntil || 0;
+    const prevPaymentError = row.paymentError || '';
     const ok = Boolean(body.account?.ok);
     row.ok = ok;
 
@@ -100,19 +112,23 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       delete row.holdUntil;
       delete row.hint;
       row.error = (body.account?.error || '处理失败').slice(0, 160);
+      appendProgressLog(row, row.error);
     } else {
       delete row.error;
       if (body.account?.accessToken) {
         row.accessToken = body.account.accessToken;
+        if (prevOk !== true) appendProgressLog(row, '账号处理成功，已回传结果');
       }
       const paymentLink = (body.account?.paymentLink || '').trim();
       if (paymentLink) {
         row.paymentLink = paymentLink;
         delete row.hint;
+        if (paymentLink !== prevLink) appendProgressLog(row, '支付链接已更新');
       }
       const paymentQr = (body.account?.paymentQr || '').trim();
       if (paymentQr.startsWith('data:image')) {
         row.paymentQr = paymentQr;
+        if (paymentQr !== prevQr) appendProgressLog(row, '支付二维码已更新');
       }
       const paymentQrUrl = (body.account?.paymentQrUrl || '').trim();
       if (paymentQrUrl) {
@@ -121,14 +137,17 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       const paymentErrorRaw = body.account?.paymentError;
       if (typeof paymentErrorRaw === 'string') {
         const paymentError = paymentErrorRaw.trim().slice(0, 160);
-        if (paymentError) row.paymentError = paymentError;
-        else delete row.paymentError;
+        if (paymentError) {
+          row.paymentError = paymentError;
+          if (paymentError !== prevPaymentError) appendProgressLog(row, paymentError);
+        } else delete row.paymentError;
       } else if (paymentLink && (paymentQr || row.paymentQr)) {
         delete row.paymentError;
       }
       const holdUntil = Number(body.account?.holdUntil);
       if (Number.isFinite(holdUntil) && holdUntil > 0) {
         row.holdUntil = holdUntil;
+        if (holdUntil !== prevHold) appendProgressLog(row, '已进入保持等待');
       }
       // 仅补传支付链接时保留已有 hint，直到拿到链接
       if (paymentLink || row.paymentLink) {
@@ -146,6 +165,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         ? `已完成 ${doneCount}/${state.total}，其余账号继续处理中…`
         : `账号已全部处理完（${doneCount}/${state.total}），正在收尾…`;
     state.message = tip;
+    appendProgressLog(state, tip);
   } else if (body.event === 'finished') {
     delete state.paymentLinks;
     delete state.paymentMessage;
@@ -162,6 +182,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       state.phase = 'failed';
       state.message = '全部失败';
     }
+    appendProgressLog(state, state.message);
   } else {
     return friendlyError(400, '未知事件');
   }

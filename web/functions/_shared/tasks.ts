@@ -22,6 +22,7 @@ export function publicStatus(state: TaskState) {
     message: state.message,
     total: state.total,
     doneCount,
+    logs: state.logs || [],
     accounts: state.accounts.map((a) => ({
       index: a.index,
       email: a.email,
@@ -34,6 +35,7 @@ export function publicStatus(state: TaskState) {
       paymentQr: a.paymentQr || undefined,
       paymentQrUrl: a.paymentQrUrl || undefined,
       holdUntil: a.holdUntil || undefined,
+      logs: a.logs || [],
     })),
     done: state.phase === 'done' || state.phase === 'failed',
     success: state.phase === 'done',

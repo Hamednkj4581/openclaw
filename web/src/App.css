@@ -68,6 +68,51 @@
   font-size: 13px;
 }
 
+.progress-log-collapse {
+  margin: 4px 0 10px;
+}
+
+.progress-log-collapse .ant-collapse-header {
+  padding: 4px 0 !important;
+  color: var(--muted) !important;
+  font-size: 13px !important;
+}
+
+.progress-log-collapse .ant-collapse-content-box {
+  padding: 4px 0 0 !important;
+}
+
+.progress-log-list {
+  max-height: 220px;
+  overflow: auto;
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(15, 118, 110, 0.04);
+}
+
+.progress-log-line {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 8px;
+  align-items: start;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.progress-log-time {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.progress-log-message {
+  color: #134e4a;
+  word-break: break-word;
+}
+
 .account-list {
   margin-top: 20px;
   display: grid;

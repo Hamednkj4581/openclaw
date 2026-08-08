@@ -3,6 +3,7 @@ import {
   Alert,
   Button,
   Card,
+  Collapse,
   Form,
   Input,
   Progress,
@@ -14,7 +15,7 @@ import {
   message,
 } from 'antd';
 import { CopyOutlined, PlayCircleOutlined } from '@ant-design/icons';
-import { fetchStatus, triggerTask, type TaskMode, type TaskStatus } from './api';
+import { fetchStatus, triggerTask, type ProgressLogEntry, type TaskMode, type TaskStatus } from './api';
 import './App.css';
 
 const { Title, Paragraph, Text } = Typography;
@@ -119,6 +120,40 @@ function AccountHoldCountdown({ holdUntil }: { holdUntil?: number }) {
   const label = useHoldCountdown(holdUntil);
   if (!label) return null;
   return <div className="hold-countdown">保持中，剩余 {label}</div>;
+}
+
+function formatLogTime(at: number): string {
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return '--:--:--';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function ProgressLogDetails({ logs, title = '详情' }: { logs?: ProgressLogEntry[]; title?: string }) {
+  if (!logs?.length) return null;
+  return (
+    <Collapse
+      className="progress-log-collapse"
+      ghost
+      size="small"
+      items={[
+        {
+          key: 'logs',
+          label: `${title}（${logs.length}）`,
+          children: (
+            <div className="progress-log-list">
+              {logs.map((log, index) => (
+                <div className="progress-log-line" key={`${log.at}-${index}`}>
+                  <span className="progress-log-time">{formatLogTime(log.at)}</span>
+                  <span className="progress-log-message">{log.message}</span>
+                </div>
+              ))}
+            </div>
+          ),
+        },
+      ]}
+    />
+  );
 }
 
 /** 等待期间轮换的友好提示（不含技术细节） */
@@ -417,6 +452,7 @@ export default function App() {
             status={status?.phase === 'failed' ? 'exception' : status?.done ? 'success' : 'active'}
             strokeColor={{ from: '#0f766e', to: '#14b8a6' }}
           />
+          <ProgressLogDetails logs={status?.logs} title="任务详情" />
 
           {status?.accounts?.length ? (
             <div className="account-list">
@@ -432,6 +468,7 @@ export default function App() {
                   {account.paymentError ? (
                     <Paragraph className="account-payment-error">{account.paymentError}</Paragraph>
                   ) : null}
+                  <ProgressLogDetails logs={account.logs} />
                   {account.accessToken ? (
                     <Space.Compact className="token-box">
                       <Input value={account.accessToken} readOnly />

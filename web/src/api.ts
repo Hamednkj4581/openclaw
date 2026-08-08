@@ -13,6 +13,11 @@ export interface TriggerPayload {
   hold_minutes?: number;
 }
 
+export interface ProgressLogEntry {
+  at: number;
+  message: string;
+}
+
 export interface AccountStatus {
   index: number;
   email: string;
@@ -25,6 +30,7 @@ export interface AccountStatus {
   paymentQr?: string;
   paymentQrUrl?: string;
   holdUntil?: number;
+  logs?: ProgressLogEntry[];
 }
 
 export interface TaskStatus {
@@ -33,6 +39,7 @@ export interface TaskStatus {
   message: string;
   total: number;
   doneCount: number;
+  logs?: ProgressLogEntry[];
   accounts: AccountStatus[];
   done: boolean;
   success: boolean;

@@ -1,0 +1,338 @@
+# 注册 / 登录共用任务实现；由 ci.yml / login.yml 以 workflow_call 调用。
+name: ChatGPT task
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: 'register 或 login'
+        required: true
+        type: string
+      commit_message:
+        description: '用于 run-name 的提交主题（非敏感）'
+        required: true
+        type: string
+      accounts:
+        description: '账号列表'
+        required: true
+        type: string
+      forwarding_emails:
+        description: '转发收件箱（仅注册；单邮箱账号收验证邮件用）'
+        required: false
+        default: 'TimmothyBegan9059@hotmail.com'
+        type: string
+      enable_mfa:
+        description: '注册后开启 ChatGPT 两步验证'
+        required: false
+        default: true
+        type: boolean
+      enable_711_proxy:
+        description: '启用 711Proxy 日本住宅代理'
+        required: false
+        default: false
+        type: boolean
+      hold_minutes:
+        description: '成功后保持分钟数'
+        required: false
+        default: '15'
+        type: string
+      payment_link_type:
+        description: '支付提链类型'
+        required: false
+        default: '未选择'
+        type: string
+      payment_card:
+        description: '支付提链卡密'
+        required: false
+        default: ''
+        type: string
+      web_task_id:
+        description: '网页控制台任务 ID'
+        required: false
+        default: ''
+        type: string
+
+run-name: ${{ inputs.commit_message }}
+
+permissions:
+  contents: read
+  actions: write
+
+env:
+  TZ: Asia/Shanghai
+  TASK_MODE: ${{ inputs.mode }}
+
+jobs:
+  prepare-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      total: ${{ steps.matrix.outputs.total }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: matrix
+        name: 校验账号并生成矩阵
+        shell: python
+        env:
+          TASK_MODE: ${{ inputs.mode }}
+          ACCOUNTS: ${{ inputs.accounts }}
+          FORWARDING_EMAILS: ${{ inputs.forwarding_emails }}
+          FORWARD_MAILBOXES: ${{ secrets.FORWARD_MAILBOXES }}
+        run: |
+          import json
+          import os
+          import sys
+
+          sys.path.insert(0, '.github/scripts')
+          from account_input import (
+              parse_accounts,
+              parse_email_list,
+              parse_login_accounts,
+              resolve_forward_mailbox,
+          )
+
+          mode = (os.environ.get('TASK_MODE') or '').strip().lower()
+          try:
+              if mode == 'login':
+                  accounts = parse_login_accounts(os.environ['ACCOUNTS'])
+              elif mode == 'register':
+                  accounts = parse_accounts(os.environ['ACCOUNTS'])
+                  if any(len(account) == 1 for account in accounts):
+                      forwarding = parse_email_list(os.environ.get('FORWARDING_EMAILS', ''))
+                      if not forwarding:
+                          raise ValueError('存在单邮箱账号时必须配置 forwarding_emails')
+                      resolve_forward_mailbox(forwarding, os.environ.get('FORWARD_MAILBOXES', ''))
+              else:
+                  raise ValueError(f'未知 mode: {mode}')
+          except ValueError as error:
+              raise SystemExit(str(error)) from None
+
+          items = [
+              {'account_index': index, 'email': account[0].strip().lower()}
+              for index, account in enumerate(accounts)
+          ]
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write('matrix=' + json.dumps(items, separators=(',', ':')) + '\n')
+              output.write(f'total={len(accounts)}\n')
+
+      - name: 通知网页控制台已开始
+        if: ${{ inputs.web_task_id != '' }}
+        continue-on-error: true
+        env:
+          WEB_TASK_ID: ${{ inputs.web_task_id }}
+          WEB_CALLBACK_URL: ${{ secrets.WEB_CALLBACK_URL }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+          WEB_EVENT: started
+          WEB_TOTAL: ${{ steps.matrix.outputs.total }}
+        run: python .github/scripts/web_callback.py
+
+  account:
+    needs: prepare-matrix
+    runs-on: ubuntu-latest
+    # 注册允许单账号失败后继续汇总；登录保持严格失败传播
+    continue-on-error: ${{ inputs.mode == 'register' }}
+    concurrency:
+      group: chatgpt-${{ inputs.mode }}-${{ matrix.email }}
+      cancel-in-progress: true
+    strategy:
+      max-parallel: 20
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 读取账号配置
+        shell: python
+        env:
+          TASK_MODE: ${{ inputs.mode }}
+          ACCOUNTS: ${{ inputs.accounts }}
+          ACCOUNT_INDEX: ${{ matrix.account_index }}
+          FORWARDING_EMAILS: ${{ inputs.forwarding_emails }}
+          FORWARD_MAILBOXES: ${{ secrets.FORWARD_MAILBOXES }}
+        run: |
+          import os
+          import sys
+
+          sys.path.insert(0, '.github/scripts')
+          from account_input import (
+              parse_accounts,
+              parse_email_list,
+              parse_login_accounts,
+              resolve_forward_mailbox,
+          )
+
+          mode = (os.environ.get('TASK_MODE') or '').strip().lower()
+          index = int(os.environ['ACCOUNT_INDEX'])
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env_file:
+              if mode == 'login':
+                  # 不使用 ::add-mask::：避免日志里 access token 被误掩码
+                  email, password, otp = parse_login_accounts(os.environ['ACCOUNTS'])[index]
+                  login_line = f'{email}----{password}----{otp}'
+                  env_file.write(f'CHATGPT_LOGIN<<__LOGIN_VALUE__\n{login_line}\n__LOGIN_VALUE__\n')
+                  env_file.write(f'ACCOUNT_EMAIL<<__EMAIL_VALUE__\n{email}\n__EMAIL_VALUE__\n')
+              else:
+                  fields = parse_accounts(os.environ['ACCOUNTS'])[index]
+                  if len(fields) == 1:
+                      forwarding = parse_email_list(os.environ.get('FORWARDING_EMAILS', ''))
+                      mailbox = resolve_forward_mailbox(forwarding, os.environ.get('FORWARD_MAILBOXES', ''))
+                      values = {
+                          'EMAIL': fields[0],
+                          'MAILBOX_EMAIL': mailbox[0],
+                          'EMAIL_PASSWORD': mailbox[1],
+                          'CLIENT_ID': mailbox[2],
+                          'REFRESH_TOKEN': mailbox[3],
+                      }
+                  elif len(fields) == 2:
+                      values = {'EMAIL': fields[0], 'ICLOUD_API_KEY': fields[1]}
+                  else:
+                      values = {
+                          'EMAIL': fields[0],
+                          'EMAIL_PASSWORD': fields[1],
+                          'CLIENT_ID': fields[2],
+                          'REFRESH_TOKEN': fields[3],
+                      }
+                  for name, value in values.items():
+                      print(f'::add-mask::{value}')
+                      env_file.write(f'{name}<<__ACCOUNT_VALUE__\n{value}\n__ACCOUNT_VALUE__\n')
+                  env_file.write(f'ACCOUNT_EMAIL<<__EMAIL_VALUE__\n{values["EMAIL"]}\n__EMAIL_VALUE__\n')
+
+      - name: 构建并运行
+        id: run
+        env:
+          ENABLE_CHATGPT_MFA: ${{ inputs.enable_mfa }}
+          ENABLE_711_PROXY: ${{ inputs.enable_711_proxy }}
+          HOLD_MINUTES: ${{ inputs.hold_minutes }}
+          WEB_TASK_ID: ${{ inputs.web_task_id }}
+          WEB_CALLBACK_URL: ${{ secrets.WEB_CALLBACK_URL }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+          WEB_ACCOUNT_INDEX: ${{ matrix.account_index }}
+          CAPSOLVER_API_KEY: ${{ secrets.CAPSOLVER_API_KEY }}
+          PROXY_USERNAME: ${{ secrets.PROXY_USERNAME }}
+          PROXY_PASSWORD: ${{ secrets.PROXY_PASSWORD }}
+          PROXY_HOST: us.rotgb.711proxy.com
+          PROXY_PORT: '10000'
+          PROXY_REGION: JP
+          PROXY_SESS_TIME: '30'
+          ACCOUNT_RESULT_PATH: step-summary
+          ACCOUNT_SESSION_JSON_PATH: session.json
+          ACCOUNT_COOKIE_DIR: cookies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk
+          npm install
+          hold="${{ inputs.hold_minutes }}"
+          mode="${{ inputs.mode }}"
+          if [ "$mode" = "login" ]; then
+            npm run build:login
+            # 登录耗时缓冲 10 分钟 + 保持时长
+            timeout -k 30s "$(( (hold + 10) * 60 ))s" node dist/login.js
+          else
+            npm run build
+            # 注册耗时缓冲 15 分钟 + 保持时长
+            timeout -k 30s "$(( (hold + 15) * 60 ))s" node dist/app.js
+          fi
+
+      - name: 通知网页控制台账号失败
+        if: ${{ failure() && inputs.web_task_id != '' }}
+        continue-on-error: true
+        env:
+          WEB_TASK_ID: ${{ inputs.web_task_id }}
+          WEB_CALLBACK_URL: ${{ secrets.WEB_CALLBACK_URL }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+          WEB_EVENT: account_done
+          WEB_ACCOUNT_INDEX: ${{ matrix.account_index }}
+          WEB_ACCOUNT_EMAIL: ${{ env.ACCOUNT_EMAIL }}
+          WEB_ACCOUNT_OK: 'false'
+          WEB_ACCOUNT_ERROR: ${{ inputs.mode == 'login' && '登录失败' || '注册失败' }}
+        run: python .github/scripts/web_callback.py
+
+      - name: 上传账号结果
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: account-${{ matrix.account_index }}
+          path: |
+            step-summary
+            session.json
+            cookies/
+            access-token.txt
+            access-token.b64.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: 上传过程证据
+        if: always() && hashFiles('evidence/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-${{ matrix.account_index }}
+          path: evidence/
+          retention-days: 7
+
+  finalize:
+    needs: account
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 下载所有账号结果
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: account-*
+          path: summaries
+
+      - name: 合并结果并处理支付提链
+        env:
+          SUMMARIES_DIR: summaries
+          PAYMENT_LINK_TYPE: ${{ inputs.payment_link_type }}
+          PAYMENT_CARD: ${{ inputs.payment_card }}
+          # 登录：无 token 不强制失败；注册：无成功结果则失败
+          REQUIRE_RESULTS: ${{ inputs.mode == 'register' && '1' || '0' }}
+        run: python .github/scripts/collect_payment_summary.py
+
+      - name: 上传支付汇总产物
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: payment-summary
+          path: |
+            all-access-tokens.txt
+            web-summary.txt
+            payment-links.txt
+            payment-message.txt
+            sessions-and-cookies.zip
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: 通知网页控制台任务结束
+        if: ${{ always() && inputs.web_task_id != '' }}
+        continue-on-error: true
+        env:
+          WEB_TASK_ID: ${{ inputs.web_task_id }}
+          WEB_CALLBACK_URL: ${{ secrets.WEB_CALLBACK_URL }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+          WEB_EVENT: finished
+          WEB_FINISHED_OK: ${{ needs.account.result == 'success' && 'true' || 'false' }}
+        run: python .github/scripts/web_callback.py
+
+      - name: 尝试删除本次 run（登录成功后清除日志中的 access token）
+        if: ${{ success() && inputs.mode == 'login' && needs.account.result == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          code=$(curl -sS -o /tmp/delete-run-body.txt -w '%{http_code}' -X DELETE \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}")
+          echo "delete_http_status=${code}"
+          if [ "${code}" = "204" ]; then
+            echo "已请求删除本次 workflow run"
+          else
+            echo "无法自动删除本次 run，请手动删除。响应："
+            cat /tmp/delete-run-body.txt || true
+          fi

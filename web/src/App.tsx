@@ -230,7 +230,7 @@ export default function App() {
             <Form.Item
               label="转发邮箱"
               name="forwarding_emails"
-              extra="单邮箱账号时使用"
+              extra="单邮箱账号收验证邮件用"
               rules={[{ required: true, message: '请选择转发邮箱' }]}
             >
               <Select options={FORWARDING_EMAIL_OPTIONS} />

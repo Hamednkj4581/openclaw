@@ -27,7 +27,7 @@ on:
           - '15'
           - '30'
       payment_link_type:
-        description: '支付提链类型（选 gcash 时在汇总阶段对接 oai9 提链）'
+        description: '支付提链类型'
         required: false
         default: '未选择'
         type: choice
@@ -35,7 +35,7 @@ on:
           - 未选择
           - gcash
       payment_card:
-        description: 'oai9 卡密（选 gcash 时必填；会写入本次 run 输入）'
+        description: '支付提链卡密（选 gcash 时填写）'
         required: false
         default: ''
         type: string
@@ -45,217 +45,18 @@ on:
         default: ''
         type: string
 
-# workflow_dispatch 无 head_commit，用显式输入作为运行名
 run-name: ${{ inputs.commit_message }}
 
-permissions:
-  contents: read
-  actions: write
-
-env:
-  TZ: Asia/Shanghai
-
 jobs:
-  prepare-matrix:
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.matrix.outputs.matrix }}
-      total: ${{ steps.matrix.outputs.total }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - id: matrix
-        name: 校验登录账号并生成矩阵
-        shell: python
-        env:
-          ACCOUNTS: ${{ inputs.accounts }}
-        run: |
-          import json
-          import os
-          import sys
-
-          sys.path.insert(0, '.github/scripts')
-          from account_input import parse_login_accounts
-
-          try:
-              accounts = parse_login_accounts(os.environ['ACCOUNTS'])
-          except ValueError as error:
-              raise SystemExit(str(error)) from None
-
-          # 矩阵带邮箱，供 login job 按邮箱做 concurrency
-          items = [
-              {'account_index': index, 'email': account[0].strip().lower()}
-              for index, account in enumerate(accounts)
-          ]
-          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
-              output.write('matrix=' + json.dumps(items, separators=(',', ':')) + '\n')
-              output.write(f'total={len(accounts)}\n')
-
-      - name: 通知网页控制台已开始
-        if: ${{ inputs.web_task_id != '' }}
-        continue-on-error: true
-        env:
-          WEB_TASK_ID: ${{ inputs.web_task_id }}
-          WEB_CALLBACK_URL: ${{ secrets.WEB_CALLBACK_URL }}
-          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
-          WEB_EVENT: started
-          WEB_TOTAL: ${{ steps.matrix.outputs.total }}
-        run: python .github/scripts/web_callback.py
-
-  login:
-    needs: prepare-matrix
-    runs-on: ubuntu-latest
-    # 同邮箱互斥；不同邮箱可并行（跨 run 也生效）
-    concurrency:
-      group: chatgpt-login-${{ matrix.email }}
-      cancel-in-progress: true
-    strategy:
-      max-parallel: 20
-      fail-fast: false
-      matrix:
-        include: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: 读取登录凭据
-        shell: python
-        env:
-          ACCOUNTS: ${{ inputs.accounts }}
-          ACCOUNT_INDEX: ${{ matrix.account_index }}
-        run: |
-          import os
-          import sys
-
-          sys.path.insert(0, '.github/scripts')
-          from account_input import parse_login_accounts
-
-          # 不使用 ::add-mask::：否则 GitHub 会把日志里的 access token 打成 ***；
-          # workflow_dispatch 的 accounts 输入本身已对有权限者可见。
-          email, password, otp = parse_login_accounts(os.environ['ACCOUNTS'])[int(os.environ['ACCOUNT_INDEX'])]
-          login_line = f'{email}----{password}----{otp}'
-          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env_file:
-              env_file.write(f'CHATGPT_LOGIN<<__LOGIN_VALUE__\n{login_line}\n__LOGIN_VALUE__\n')
-              env_file.write(f'LOGIN_EMAIL<<__EMAIL_VALUE__\n{email}\n__EMAIL_VALUE__\n')
-
-      - name: 构建并执行 ChatGPT 登录
-        id: login-run
-        env:
-          ENABLE_711_PROXY: ${{ inputs.enable_711_proxy }}
-          HOLD_MINUTES: ${{ inputs.hold_minutes }}
-          WEB_TASK_ID: ${{ inputs.web_task_id }}
-          WEB_CALLBACK_URL: ${{ secrets.WEB_CALLBACK_URL }}
-          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
-          WEB_ACCOUNT_INDEX: ${{ matrix.account_index }}
-          CAPSOLVER_API_KEY: ${{ secrets.CAPSOLVER_API_KEY }}
-          PROXY_USERNAME: ${{ secrets.PROXY_USERNAME }}
-          PROXY_PASSWORD: ${{ secrets.PROXY_PASSWORD }}
-          PROXY_HOST: us.rotgb.711proxy.com
-          PROXY_PORT: '10000'
-          PROXY_REGION: JP
-          PROXY_SESS_TIME: '30'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y fonts-noto-cjk
-          npm install
-          npm run build:login
-          # 登录耗时缓冲 10 分钟 + 保持时长
-          hold="${{ inputs.hold_minutes }}"
-          timeout -k 30s "$(( (hold + 10) * 60 ))s" node dist/login.js
-
-      - name: 通知网页控制台账号失败
-        if: ${{ failure() && inputs.web_task_id != '' }}
-        continue-on-error: true
-        env:
-          WEB_TASK_ID: ${{ inputs.web_task_id }}
-          WEB_CALLBACK_URL: ${{ secrets.WEB_CALLBACK_URL }}
-          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
-          WEB_EVENT: account_done
-          WEB_ACCOUNT_INDEX: ${{ matrix.account_index }}
-          WEB_ACCOUNT_EMAIL: ${{ env.LOGIN_EMAIL }}
-          WEB_ACCOUNT_OK: 'false'
-          WEB_ACCOUNT_ERROR: 登录失败
-        run: python .github/scripts/web_callback.py
-
-      - name: 上传 access token 产物
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: access-token-${{ matrix.account_index }}
-          path: |
-            access-token.txt
-            access-token.b64.txt
-          if-no-files-found: warn
-          retention-days: 1
-
-      - name: 上传登录过程证据
-        if: always() && hashFiles('evidence/**') != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: login-evidence-${{ matrix.account_index }}
-          path: evidence/
-          retention-days: 3
-
-  finalize:
-    needs: login
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: 下载登录 access token 产物
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          pattern: access-token-*
-          path: summaries
-
-      - name: 合并结果并处理支付提链
-        env:
-          SUMMARIES_DIR: summaries
-          PAYMENT_LINK_TYPE: ${{ inputs.payment_link_type }}
-          PAYMENT_CARD: ${{ inputs.payment_card }}
-          # 登录汇总：无 token 时不强制失败（账号结果已由 login job 决定）
-          REQUIRE_RESULTS: '0'
-        run: python .github/scripts/collect_payment_summary.py
-
-      - name: 上传支付汇总产物
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: payment-summary
-          path: |
-            all-access-tokens.txt
-            payment-links.txt
-            payment-message.txt
-          if-no-files-found: ignore
-          retention-days: 1
-
-      - name: 通知网页控制台任务结束
-        if: ${{ inputs.web_task_id != '' }}
-        continue-on-error: true
-        env:
-          WEB_TASK_ID: ${{ inputs.web_task_id }}
-          WEB_CALLBACK_URL: ${{ secrets.WEB_CALLBACK_URL }}
-          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
-          WEB_EVENT: finished
-          WEB_FINISHED_OK: ${{ needs.login.result == 'success' }}
-        run: python .github/scripts/web_callback.py
-
-      - name: 尝试删除本次 run（清除日志中的 access token）
-        if: success() && needs.login.result == 'success'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set +e
-          code=$(curl -sS -o /tmp/delete-run-body.txt -w '%{http_code}' -X DELETE \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}")
-          echo "delete_http_status=${code}"
-          if [ "${code}" = "204" ]; then
-            echo "已请求删除本次 workflow run"
-          else
-            echo "无法自动删除本次 run，请手动删除。响应："
-            cat /tmp/delete-run-body.txt || true
-          fi
+  call:
+    uses: ./.github/workflows/chatgpt-task.yml
+    with:
+      mode: login
+      commit_message: ${{ inputs.commit_message }}
+      accounts: ${{ inputs.accounts }}
+      enable_711_proxy: ${{ inputs.enable_711_proxy }}
+      hold_minutes: ${{ inputs.hold_minutes }}
+      payment_link_type: ${{ inputs.payment_link_type }}
+      payment_card: ${{ inputs.payment_card }}
+      web_task_id: ${{ inputs.web_task_id }}
+    secrets: inherit

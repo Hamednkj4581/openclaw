@@ -67,6 +67,7 @@ function saveProxyRegionLinks(region: string, links: string): void {
 }
 
 const HOLD_MINUTES_OPTIONS = [
+  { value: 0, label: '0 分钟' },
   { value: 5, label: '5 分钟' },
   { value: 10, label: '10 分钟' },
   { value: 15, label: '15 分钟' },
@@ -272,7 +273,9 @@ export default function App() {
         proxy_links: isProxyEnabled(values.proxy_region) ? (values.proxy_links || '').trim() : '',
         payment_link_type: values.payment_link_type,
         payment_card: values.payment_card,
-        hold_minutes: Number(values.hold_minutes) || 15,
+        hold_minutes: [0, 5, 10, 15, 30].includes(Number(values.hold_minutes))
+          ? Number(values.hold_minutes)
+          : 15,
       };
       const result =
         mode === 'register'

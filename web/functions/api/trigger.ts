@@ -84,7 +84,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   await writeTask(context.env, taskId, state);
 
   const hold = Number(body.hold_minutes);
-  const holdMinutes = [5, 10, 15, 30].includes(hold) ? String(hold) : '15';
+  const holdMinutes = [0, 5, 10, 15, 30].includes(hold) ? String(hold) : '15';
 
   const inputs: Record<string, string> = {
     commit_message: commitMessage(mode),

@@ -4,7 +4,7 @@ import logger from './logger.js';
 import { extractAccountPaymentLink } from './paymentLink.js';
 import { capturePaymentQr, type ProxyAuth } from './paymentQr.js';
 
-const ALLOWED_HOLD_MINUTES = new Set([5, 10, 15, 30]);
+const ALLOWED_HOLD_MINUTES = new Set([0, 5, 10, 15, 30]);
 
 /** 读取延迟关闭分钟数；兼容 HOLD_MINUTES / LOGIN_HOLD_MINUTES */
 export function resolveHoldMinutes(): number {
@@ -167,17 +167,22 @@ export async function finishAccountSuccess(
 
     // 提链完成后再开始「等待关闭」；paymentError 单独落库，不被保持提示覆盖
     const holdMinutes = resolveHoldMinutes();
-    const holdUntil = Date.now() + holdMinutes * 60 * 1000;
+    const holdUntil = holdMinutes > 0 ? Date.now() + holdMinutes * 60 * 1000 : 0;
     logger.info('提链阶段结束，即将开始保持等待 %s 分钟', holdMinutes);
     await notifyWebAccountSuccess(email, accessToken, {
-        holdUntil,
+        ...(holdUntil > 0 ? { holdUntil } : {}),
         ...(paymentLink ? { paymentLink } : {}),
         ...(paymentQr ? { paymentQr } : {}),
         ...(paymentQrUrl ? { paymentQrUrl } : {}),
         ...(paymentError ? { paymentError } : {}),
     });
-    await notifyWebProgress(`将保持约 ${holdMinutes} 分钟后关闭…`, email);
-    await waitHoldMinutes(holdMinutes, holdUntil);
+    if (holdMinutes > 0) {
+        await notifyWebProgress(`将保持约 ${holdMinutes} 分钟后关闭…`, email);
+        await waitHoldMinutes(holdMinutes, holdUntil);
+    } else {
+        await notifyWebProgress('保持为 0 分钟，即将关闭…', email);
+        logger.info('保持时长为 0，跳过等待直接退出');
+    }
 }
 
 export async function waitHoldMinutes(holdMinutes: number, holdUntil: number): Promise<void> {

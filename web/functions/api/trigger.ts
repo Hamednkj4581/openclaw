@@ -11,6 +11,7 @@ interface TriggerBody {
   enable_mfa?: boolean;
   enable_711_proxy?: boolean;
   payment_link_type?: string;
+  payment_card?: string;
   hold_minutes?: number | string;
 }
 
@@ -39,6 +40,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const accounts = (body.accounts || '').trim();
   if (!accounts) return friendlyError(400, '请填写账号');
 
+  const paymentLinkType = body.payment_link_type === 'gcash' ? 'gcash' : '未选择';
+  const paymentCard = (body.payment_card || '').trim();
+  if (paymentLinkType === 'gcash' && !paymentCard) {
+    return friendlyError(400, '选择 gcash 时请填写卡密');
+  }
+
   const taskId = crypto.randomUUID();
   const state: TaskState = {
     mode,
@@ -56,12 +63,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     accounts,
     web_task_id: taskId,
     enable_711_proxy: String(Boolean(body.enable_711_proxy)),
+    payment_link_type: paymentLinkType,
+    payment_card: paymentLinkType === 'gcash' ? paymentCard : '',
   };
 
   if (mode === 'register') {
     inputs.forwarding_emails = (body.forwarding_emails || '').trim();
     inputs.enable_mfa = String(body.enable_mfa !== false);
-    inputs.payment_link_type = body.payment_link_type === 'gcash' ? 'gcash' : '未选择';
   } else {
     const hold = Number(body.hold_minutes);
     inputs.hold_minutes = [5, 10, 15, 30].includes(hold) ? String(hold) : '5';

@@ -35,18 +35,26 @@ const HOLD_MINUTES_OPTIONS = [
   { value: 30, label: '30 分钟' },
 ];
 
+const PAYMENT_LINK_OPTIONS = [
+  { value: '未选择', label: '未选择' },
+  { value: 'gcash', label: 'gcash' },
+];
+
 interface RegisterForm {
   accounts: string;
   forwarding_emails: string;
   enable_mfa: boolean;
   proxy_region: string;
   payment_link_type: string;
+  payment_card: string;
 }
 
 interface LoginForm {
   accounts: string;
   proxy_region: string;
   hold_minutes: number;
+  payment_link_type: string;
+  payment_card: string;
 }
 
 function isProxyEnabled(region: string | undefined): boolean {
@@ -95,6 +103,8 @@ export default function App() {
   const [status, setStatus] = useState<TaskStatus | null>(null);
   const [registerForm] = Form.useForm<RegisterForm>();
   const [loginForm] = Form.useForm<LoginForm>();
+  const registerPaymentType = Form.useWatch('payment_link_type', registerForm);
+  const loginPaymentType = Form.useWatch('payment_link_type', loginForm);
 
   useEffect(() => {
     if (!taskId) return;
@@ -141,6 +151,7 @@ export default function App() {
         enable_mfa: values.enable_mfa,
         enable_711_proxy: isProxyEnabled(values.proxy_region),
         payment_link_type: values.payment_link_type,
+        payment_card: values.payment_card,
       });
       setTaskId(result.taskId);
       setStatus(null);
@@ -160,6 +171,8 @@ export default function App() {
         accounts: values.accounts,
         enable_711_proxy: isProxyEnabled(values.proxy_region),
         hold_minutes: Number(values.hold_minutes) || 5,
+        payment_link_type: values.payment_link_type,
+        payment_card: values.payment_card,
       });
       setTaskId(result.taskId);
       setStatus(null);
@@ -171,9 +184,9 @@ export default function App() {
     }
   };
 
-  const copyToken = async (token: string) => {
-    await navigator.clipboard.writeText(token);
-    message.success('已复制');
+  const copyText = async (text: string, okMessage = '已复制') => {
+    await navigator.clipboard.writeText(text);
+    message.success(okMessage);
   };
 
   return (
@@ -208,6 +221,7 @@ export default function App() {
               enable_mfa: true,
               proxy_region: 'none',
               payment_link_type: '未选择',
+              payment_card: '',
             }}
             onFinish={onSubmitRegister}
           >
@@ -235,15 +249,19 @@ export default function App() {
                 <Select style={{ width: 200 }} options={PROXY_REGION_OPTIONS} />
               </Form.Item>
               <Form.Item label="支付提链" name="payment_link_type">
-                <Select
-                  style={{ width: 160 }}
-                  options={[
-                    { value: '未选择', label: '未选择' },
-                    { value: 'gcash', label: 'gcash' },
-                  ]}
-                />
+                <Select style={{ width: 160 }} options={PAYMENT_LINK_OPTIONS} />
               </Form.Item>
             </Space>
+            {registerPaymentType === 'gcash' ? (
+              <Form.Item
+                label="oai9 卡密"
+                name="payment_card"
+                rules={[{ required: true, message: '请填写卡密' }]}
+                extra="汇总阶段提交到 long.oai9.com 提取 GCash 链接"
+              >
+                <Input.Password placeholder="卡密" autoComplete="off" />
+              </Form.Item>
+            ) : null}
             <Button type="primary" htmlType="submit" icon={<PlayCircleOutlined />} loading={submitting} size="large">
               开始注册
             </Button>
@@ -253,7 +271,12 @@ export default function App() {
             form={loginForm}
             layout="vertical"
             className="task-form"
-            initialValues={{ proxy_region: 'none', hold_minutes: 5 }}
+            initialValues={{
+              proxy_region: 'none',
+              hold_minutes: 5,
+              payment_link_type: '未选择',
+              payment_card: '',
+            }}
             onFinish={onSubmitLogin}
           >
             <Form.Item
@@ -271,7 +294,20 @@ export default function App() {
               <Form.Item label="延迟关闭" name="hold_minutes" rules={[{ required: true, message: '请选择延迟关闭时间' }]}>
                 <Select style={{ width: 140 }} options={HOLD_MINUTES_OPTIONS} />
               </Form.Item>
+              <Form.Item label="支付提链" name="payment_link_type">
+                <Select style={{ width: 160 }} options={PAYMENT_LINK_OPTIONS} />
+              </Form.Item>
             </Space>
+            {loginPaymentType === 'gcash' ? (
+              <Form.Item
+                label="oai9 卡密"
+                name="payment_card"
+                rules={[{ required: true, message: '请填写卡密' }]}
+                extra="汇总阶段提交到 long.oai9.com 提取 GCash 链接"
+              >
+                <Input.Password placeholder="卡密" autoComplete="off" />
+              </Form.Item>
+            ) : null}
             <Button type="primary" htmlType="submit" icon={<PlayCircleOutlined />} loading={submitting} size="large">
               开始登录
             </Button>
@@ -301,7 +337,7 @@ export default function App() {
                   {account.accessToken ? (
                     <Space.Compact className="token-box">
                       <Input value={account.accessToken} readOnly />
-                      <Button icon={<CopyOutlined />} onClick={() => void copyToken(account.accessToken!)}>
+                      <Button icon={<CopyOutlined />} onClick={() => void copyText(account.accessToken!)}>
                         复制
                       </Button>
                     </Space.Compact>
@@ -313,6 +349,32 @@ export default function App() {
           ) : (
             <Alert type="info" showIcon message="等待账号进度更新…" style={{ marginTop: 16 }} />
           )}
+
+          {status?.paymentLinks?.length ? (
+            <div className="payment-links">
+              <div className="payment-links-head">
+                <Text strong>支付链接</Text>
+                <Button
+                  size="small"
+                  icon={<CopyOutlined />}
+                  onClick={() => void copyText(status.paymentLinks!.join('\n'), '已复制全部链接')}
+                >
+                  复制全部
+                </Button>
+              </div>
+              {status.paymentMessage ? <Paragraph type="secondary">{status.paymentMessage}</Paragraph> : null}
+              <div className="payment-link-list">
+                {status.paymentLinks.map((link) => (
+                  <Space.Compact className="token-box" key={link}>
+                    <Input value={link} readOnly />
+                    <Button icon={<CopyOutlined />} onClick={() => void copyText(link)}>
+                      复制
+                    </Button>
+                  </Space.Compact>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </Card>
       )}
     </div>

@@ -15,6 +15,8 @@ interface WebhookBody {
     holdUntil?: number;
   };
   ok?: boolean;
+  paymentLinks?: string[];
+  paymentMessage?: string;
 }
 
 function ensureAccountSlot(state: TaskState, index: number, email: string): AccountResult {
@@ -27,6 +29,20 @@ function ensureAccountSlot(state: TaskState, index: number, email: string): Acco
     row.email = email;
   }
   return row;
+}
+
+function normalizePaymentLinks(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const links: string[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== 'string') continue;
+    const link = item.trim();
+    if (!link || seen.has(link)) continue;
+    seen.add(link);
+    links.push(link);
+  }
+  return links;
 }
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
@@ -85,17 +101,30 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     state.phase = 'processing';
     state.message = `处理中（${doneCount}/${state.total || '?'}）`;
   } else if (body.event === 'finished') {
+    const links = normalizePaymentLinks(body.paymentLinks);
+    if (links.length) {
+      state.paymentLinks = links;
+    } else {
+      delete state.paymentLinks;
+    }
+    const paymentMessage = typeof body.paymentMessage === 'string' ? body.paymentMessage.trim().slice(0, 200) : '';
+    if (paymentMessage) {
+      state.paymentMessage = paymentMessage;
+    } else {
+      delete state.paymentMessage;
+    }
+
     const allOk = state.accounts.length > 0 && state.accounts.every((a) => a.ok === true);
     const anyOk = state.accounts.some((a) => a.ok === true);
     if (allOk) {
       state.phase = 'done';
-      state.message = '全部完成';
+      state.message = paymentMessage || '全部完成';
     } else if (anyOk) {
       state.phase = 'done';
-      state.message = '部分完成';
+      state.message = paymentMessage || '部分完成';
     } else {
       state.phase = 'failed';
-      state.message = '全部失败';
+      state.message = paymentMessage || '全部失败';
     }
   } else {
     return friendlyError(400, '未知事件');

@@ -26,6 +26,19 @@ on:
           - '10'
           - '15'
           - '30'
+      payment_link_type:
+        description: '支付提链类型（选 gcash 时在汇总阶段对接 oai9 提链）'
+        required: false
+        default: '未选择'
+        type: choice
+        options:
+          - 未选择
+          - gcash
+      payment_card:
+        description: 'oai9 卡密（选 gcash 时必填；会写入本次 run 输入）'
+        required: false
+        default: ''
+        type: string
       web_task_id:
         description: '网页控制台任务 ID（有值时回传进度与 access token）'
         required: false
@@ -188,6 +201,34 @@ jobs:
     if: always()
     steps:
       - uses: actions/checkout@v4
+
+      - name: 下载登录 access token 产物
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: access-token-*
+          path: summaries
+
+      - name: 合并结果并处理支付提链
+        env:
+          SUMMARIES_DIR: summaries
+          PAYMENT_LINK_TYPE: ${{ inputs.payment_link_type }}
+          PAYMENT_CARD: ${{ inputs.payment_card }}
+          # 登录汇总：无 token 时不强制失败（账号结果已由 login job 决定）
+          REQUIRE_RESULTS: '0'
+        run: python .github/scripts/collect_payment_summary.py
+
+      - name: 上传支付汇总产物
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: payment-summary
+          path: |
+            all-access-tokens.txt
+            payment-links.txt
+            payment-message.txt
+          if-no-files-found: ignore
+          retention-days: 1
 
       - name: 通知网页控制台任务结束
         if: ${{ inputs.web_task_id != '' }}

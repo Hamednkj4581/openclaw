@@ -18,6 +18,9 @@ export interface TaskState {
   message: string;
   total: number;
   accounts: AccountResult[];
+  /** oai9 提链得到的最终支付链接列表 */
+  paymentLinks?: string[];
+  paymentMessage?: string;
   createdAt: number;
   updatedAt: number;
 }

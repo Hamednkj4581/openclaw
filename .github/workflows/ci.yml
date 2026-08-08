@@ -27,13 +27,18 @@ on:
         default: false
         type: boolean
       payment_link_type:
-        description: '支付提链类型（选 gcash 时在汇总阶段检查 zero trial）'
+        description: '支付提链类型（选 gcash 时在汇总阶段对接 oai9 提链）'
         required: false
         default: '未选择'
         type: choice
         options:
           - 未选择
           - gcash
+      payment_card:
+        description: 'oai9 卡密（选 gcash 时必填；会写入本次 run 输入）'
+        required: false
+        default: ''
+        type: string
       web_task_id:
         description: '网页控制台任务 ID（有值时回传进度与 access token）'
         required: false
@@ -232,6 +237,7 @@ jobs:
         env:
           SUMMARIES_DIR: summaries
           PAYMENT_LINK_TYPE: ${{ inputs.payment_link_type }}
+          PAYMENT_CARD: ${{ inputs.payment_card }}
         run: python .github/scripts/collect_payment_summary.py
 
       - name: 上传支付汇总产物
@@ -242,7 +248,8 @@ jobs:
           path: |
             all-access-tokens.txt
             web-summary.txt
-            zero-trial-tokens.txt
+            payment-links.txt
+            payment-message.txt
             sessions-and-cookies.zip
           if-no-files-found: ignore
           retention-days: 7

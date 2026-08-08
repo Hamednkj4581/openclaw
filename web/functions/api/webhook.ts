@@ -38,11 +38,6 @@ function isTerminal(phase: TaskPhase): boolean {
   return phase === 'done' || phase === 'failed' || phase === 'cancelled';
 }
 
-/** 「即将关闭…」无业务信息，整条忽略（兼容旧 runner） */
-function isIgnorableClosingProgress(tip: string): boolean {
-  return /^即将关闭/.test(tip.trim());
-}
-
 /** 收尾类进度只写日志，不覆盖 account_done 已回传的 hint */
 function shouldUpdateHintFromProgress(tip: string): boolean {
   const text = tip.trim();
@@ -117,9 +112,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   if (body.event === 'progress') {
     const tip = (body.message || '').trim().slice(0, 160);
     if (!tip) return friendlyError(400, '进度文案无效');
-    if (isIgnorableClosingProgress(tip)) {
-      return json({ ok: true, ignored: true });
-    }
 
     // 任务已结束后忽略迟到进度，避免把终态打回 processing
     if (isTerminal(state.phase)) {

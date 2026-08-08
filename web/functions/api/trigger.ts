@@ -5,6 +5,8 @@ import { writeTask } from '../_shared/tasks';
 import type { TaskMode, TaskState } from '../_shared/types';
 
 const PROXY_REGIONS = new Set(['JP', 'PH']);
+const LOGIN_ACCOUNT_RE = /^\S+@\S+\.\S+$/;
+const BASE32_RE = /^[A-Z2-7=]+$/i;
 
 interface TriggerBody {
   mode?: TaskMode;
@@ -19,6 +21,9 @@ interface TriggerBody {
   payment_link_type?: string;
   payment_card?: string;
   gc_ph_api_key?: string;
+  hero_sms_api_key?: string;
+  hero_sms_service?: string;
+  hero_sms_country?: string;
   hold_minutes?: number | string;
 }
 
@@ -37,6 +42,32 @@ function parseProxyLinks(value: string): string[] {
     .filter(Boolean);
 }
 
+/** 提交前校验登录/绑定手机账号格式，任一错误整单拒绝 */
+function validateLoginAccounts(accounts: string, label: string): string | null {
+  const records = accounts.split(/(?:\r?\n|;)+/).map((item) => item.trim()).filter(Boolean);
+  if (!records.length) return `请填写${label}账号`;
+  for (let index = 0; index < records.length; index++) {
+    const fields = records[index].split(/-{4,}/).map((part) => part.trim()).filter(Boolean);
+    if (fields.length < 3) {
+      return `第 ${index + 1} 个账号格式错误，须为 email----password----2fa`;
+    }
+    const [email, password, otp] = fields;
+    if (!LOGIN_ACCOUNT_RE.test(email)) {
+      return `第 ${index + 1} 个账号邮箱格式无效`;
+    }
+    if (!password) return `第 ${index + 1} 个账号密码为空`;
+    if (!BASE32_RE.test(otp.replace(/\s+/g, ''))) {
+      return `第 ${index + 1} 个账号 2FA 密钥应为 Base32`;
+    }
+  }
+  return null;
+}
+
+function parseMode(raw: unknown): TaskMode | null {
+  if (raw === 'register' || raw === 'login' || raw === 'bind_phone') return raw;
+  return null;
+}
+
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const missing = requireEnv(context.env);
   if (missing) return friendlyError(503, missing);
@@ -48,18 +79,31 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return friendlyError(400, '请求格式无效');
   }
 
-  const mode = body.mode === 'login' ? 'login' : body.mode === 'register' ? 'register' : null;
+  const mode = parseMode(body.mode);
   if (!mode) return friendlyError(400, '请选择任务类型');
 
   const accounts = (body.accounts || '').trim();
   if (!accounts) return friendlyError(400, '请填写账号');
 
-  const paymentLinkType = body.payment_link_type === 'gcash' ? 'gcash' : '未选择';
+  if (mode === 'login' || mode === 'bind_phone') {
+    const accountError = validateLoginAccounts(accounts, mode === 'bind_phone' ? '绑定手机' : '登录');
+    if (accountError) return friendlyError(400, accountError);
+  }
+
+  const heroSmsApiKey = (body.hero_sms_api_key || '').trim();
+  const heroSmsService = (body.hero_sms_service || '').trim();
+  const heroSmsCountry = (body.hero_sms_country || '').trim();
+  if (mode === 'bind_phone') {
+    if (!heroSmsApiKey) return friendlyError(400, '绑定手机须填写 Hero SMS API Key');
+    if (!heroSmsService) return friendlyError(400, '绑定手机须选择服务');
+    if (!/^\d+$/.test(heroSmsCountry)) return friendlyError(400, '绑定手机须选择国家');
+  }
+
+  const paymentLinkType = mode === 'bind_phone' ? '未选择' : body.payment_link_type === 'gcash' ? 'gcash' : '未选择';
   const paymentCard = (body.payment_card || '').trim();
   if (paymentLinkType === 'gcash' && !paymentCard) {
     return friendlyError(400, '选择 gcash 时请填写卡密');
   }
-  // 可选；有值才在提链截屏后走菲律宾通道，未传则跳过
   const gcPhApiKey = paymentLinkType === 'gcash' ? (body.gc_ph_api_key || '').trim() : '';
 
   const proxyRegionRaw = (body.proxy_region || '').trim().toUpperCase();
@@ -102,13 +146,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     web_task_id: taskId,
     enable_711_proxy: String(enableProxy),
     proxy_region: proxyRegion,
-    // 711 账号优先；有账号时不传链接，避免后端误走静态链接模式
     proxy_username: enableProxy && use711Account ? proxyUsername : '',
     proxy_password: enableProxy && use711Account ? proxyPassword : '',
     proxy_links: enableProxy && !use711Account ? proxyLinks : '',
     payment_link_type: paymentLinkType,
     payment_card: paymentLinkType === 'gcash' ? paymentCard : '',
     gc_ph_api_key: gcPhApiKey,
+    hero_sms_api_key: mode === 'bind_phone' ? heroSmsApiKey : '',
+    hero_sms_service: mode === 'bind_phone' ? heroSmsService : '',
+    hero_sms_country: mode === 'bind_phone' ? heroSmsCountry : '',
     hold_minutes: holdMinutes,
   };
 

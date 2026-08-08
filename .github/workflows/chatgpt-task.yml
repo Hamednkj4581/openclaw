@@ -5,7 +5,7 @@ on:
   workflow_call:
     inputs:
       mode:
-        description: 'register 或 login'
+        description: 'register、login 或 bind_phone'
         required: true
         type: string
       commit_message:
@@ -71,6 +71,21 @@ on:
         required: false
         default: ''
         type: string
+      hero_sms_api_key:
+        description: 'Hero SMS API Key（bind_phone 模式必填）'
+        required: false
+        default: ''
+        type: string
+      hero_sms_service:
+        description: 'Hero SMS 服务码'
+        required: false
+        default: ''
+        type: string
+      hero_sms_country:
+        description: 'Hero SMS 国家 ID'
+        required: false
+        default: ''
+        type: string
       web_task_id:
         description: '网页控制台任务 ID'
         required: false
@@ -119,7 +134,7 @@ jobs:
 
           mode = (os.environ.get('TASK_MODE') or '').strip().lower()
           try:
-              if mode == 'login':
+              if mode in ('login', 'bind_phone'):
                   accounts = parse_login_accounts(os.environ['ACCOUNTS'])
               elif mode == 'register':
                   accounts = parse_accounts(os.environ['ACCOUNTS'])
@@ -155,8 +170,8 @@ jobs:
   account:
     needs: prepare-matrix
     runs-on: ubuntu-latest
-    # 注册允许单账号失败后继续汇总；登录保持严格失败传播
-    continue-on-error: ${{ inputs.mode == 'register' }}
+    # 注册/绑定手机允许单账号失败后继续汇总；登录保持严格失败传播
+    continue-on-error: ${{ inputs.mode == 'register' || inputs.mode == 'bind_phone' }}
     concurrency:
       group: chatgpt-${{ inputs.mode }}-${{ matrix.email }}
       cancel-in-progress: true
@@ -191,7 +206,7 @@ jobs:
           mode = (os.environ.get('TASK_MODE') or '').strip().lower()
           index = int(os.environ['ACCOUNT_INDEX'])
           with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env_file:
-              if mode == 'login':
+              if mode in ('login', 'bind_phone'):
                   # 不使用 ::add-mask::：避免日志里 access token 被误掩码
                   email, password, otp = parse_login_accounts(os.environ['ACCOUNTS'])[index]
                   login_line = f'{email}----{password}----{otp}'
@@ -232,6 +247,9 @@ jobs:
           PAYMENT_LINK_TYPE: ${{ inputs.payment_link_type }}
           PAYMENT_CARD: ${{ inputs.payment_card }}
           GC_PH_API_KEY: ${{ inputs.gc_ph_api_key }}
+          HERO_SMS_API_KEY: ${{ inputs.hero_sms_api_key }}
+          HERO_SMS_SERVICE: ${{ inputs.hero_sms_service }}
+          HERO_SMS_COUNTRY: ${{ inputs.hero_sms_country }}
           WEB_TASK_ID: ${{ inputs.web_task_id }}
           WEB_CALLBACK_URL: ${{ secrets.WEB_CALLBACK_URL }}
           WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
@@ -257,6 +275,7 @@ jobs:
           if [ -n "${PROXY_USERNAME}" ]; then echo "::add-mask::${PROXY_USERNAME}"; fi
           if [ -n "${PROXY_PASSWORD}" ]; then echo "::add-mask::${PROXY_PASSWORD}"; fi
           if [ -n "${GC_PH_API_KEY}" ]; then echo "::add-mask::${GC_PH_API_KEY}"; fi
+          if [ -n "${HERO_SMS_API_KEY}" ]; then echo "::add-mask::${HERO_SMS_API_KEY}"; fi
           if [ -n "${PROXY_LINKS}" ]; then
             printf '%s\n' "${PROXY_LINKS}" | while IFS= read -r line; do
               [ -n "$line" ] && echo "::add-mask::${line}"
@@ -266,7 +285,8 @@ jobs:
           extra=0
           if [ "${{ inputs.payment_link_type }}" = "gcash" ]; then extra=10; fi
           if [ -n "${GC_PH_API_KEY}" ] && [ "${{ inputs.payment_link_type }}" = "gcash" ]; then extra=$((extra + 20)); fi
-          if [ "$mode" = "login" ]; then
+          if [ "$mode" = "bind_phone" ]; then extra=$((extra + 15)); fi
+          if [ "$mode" = "login" ] || [ "$mode" = "bind_phone" ]; then
             npm run build:login
             timeout -k 30s "$(( (hold + 10 + extra) * 60 ))s" node dist/login.js
           else
@@ -286,7 +306,7 @@ jobs:
           WEB_ACCOUNT_INDEX: ${{ matrix.account_index }}
           WEB_ACCOUNT_EMAIL: ${{ env.ACCOUNT_EMAIL || matrix.email }}
           WEB_ACCOUNT_OK: 'false'
-          WEB_ACCOUNT_ERROR_DEFAULT: ${{ inputs.mode == 'login' && '登录失败' || '注册失败' }}
+          WEB_ACCOUNT_ERROR_DEFAULT: ${{ inputs.mode == 'login' && '登录失败' || inputs.mode == 'bind_phone' && '绑定失败' || '注册失败' }}
         run: |
           if [ -f web-account-error.txt ]; then
             WEB_ACCOUNT_ERROR="$(python -c "from pathlib import Path; t=Path('web-account-error.txt').read_text(encoding='utf-8').strip().splitlines(); print((t[0] if t else '')[:240])")"

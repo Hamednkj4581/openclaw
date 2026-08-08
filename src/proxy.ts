@@ -21,6 +21,8 @@ export type ProxyConfig = {
 };
 
 const MAX_SESSION_ATTEMPTS = 3;
+const PROXY_PREFLIGHT_ATTEMPTS = 3;
+const PROXY_PREFLIGHT_RETRY_MS = 2_000;
 const PROXY_PROBE_TIMEOUT_MS = 5_000;
 const CHATGPT_API_PROBE_URL = 'https://api.chatgpt.com/v1';
 
@@ -241,9 +243,13 @@ export async function probeChatgptViaProxy(
     return response.status;
 }
 
+async function sleep(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * 启动浏览器前预检：只测代理访问 ChatGPT API 是否可达。
- * 711 账号模式失败可换 sticky 重试；静态链接模式失败立即抛错。
+ * 711 账号模式失败可换 sticky 重试；静态链接模式在同一 session 上重试若干次。
  */
 export async function preflightProxy(proxy: ProxyConfig): Promise<void> {
     const axiosProxy: {
@@ -260,24 +266,34 @@ export async function preflightProxy(proxy: ProxyConfig): Promise<void> {
         axiosProxy.auth = { username: proxy.username, password: proxy.password };
     }
 
-    const maxAttempts = proxy.stickyRotate ? MAX_SESSION_ATTEMPTS : 1;
+    const sessionAttempts = proxy.stickyRotate ? MAX_SESSION_ATTEMPTS : 1;
     let lastError = '';
-    for (let sessionAttempt = 1; sessionAttempt <= maxAttempts; sessionAttempt++) {
+    for (let sessionAttempt = 1; sessionAttempt <= sessionAttempts; sessionAttempt++) {
         if (proxy.username || proxy.password) {
             axiosProxy.auth = { username: proxy.username, password: proxy.password };
         }
-        try {
-            const status = await probeChatgptViaProxy(axiosProxy);
-            logger.info('代理可用性预检通过：api.chatgpt.com/v1 status=%s link=#%s attempt=%s sticky=%s',
-                status, proxy.linkIndex + 1, sessionAttempt, proxy.stickyRotate);
-            return;
-        } catch (error) {
-            lastError = axios.isAxiosError(error) ? error.message : String(error);
-            if (!proxy.stickyRotate || sessionAttempt >= maxAttempts) break;
-            logger.warn('代理可用性预检失败：%s；更换 sticky session 重试 %s/%s',
-                lastError, sessionAttempt + 1, maxAttempts);
-            rotateStickySession(proxy);
+        for (let probeAttempt = 1; probeAttempt <= PROXY_PREFLIGHT_ATTEMPTS; probeAttempt++) {
+            try {
+                const status = await probeChatgptViaProxy(axiosProxy);
+                logger.info(
+                    '代理可用性预检通过：api.chatgpt.com/v1 status=%s link=#%s session=%s/%s probe=%s/%s sticky=%s',
+                    status, proxy.linkIndex + 1, sessionAttempt, sessionAttempts,
+                    probeAttempt, PROXY_PREFLIGHT_ATTEMPTS, proxy.stickyRotate,
+                );
+                return;
+            } catch (error) {
+                lastError = axios.isAxiosError(error) ? error.message : String(error);
+                if (probeAttempt < PROXY_PREFLIGHT_ATTEMPTS) {
+                    logger.warn('代理可用性预检失败（probe %s/%s）：%s；%s 秒后重试',
+                        probeAttempt, PROXY_PREFLIGHT_ATTEMPTS, lastError, PROXY_PREFLIGHT_RETRY_MS / 1000);
+                    await sleep(PROXY_PREFLIGHT_RETRY_MS);
+                }
+            }
         }
+        if (!proxy.stickyRotate || sessionAttempt >= sessionAttempts) break;
+        logger.warn('代理可用性预检失败：%s；更换 sticky session 重试 %s/%s',
+            lastError, sessionAttempt + 1, sessionAttempts);
+        rotateStickySession(proxy);
     }
     throw new Error(`代理可用性预检失败：${lastError}`);
 }

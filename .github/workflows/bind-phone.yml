@@ -1,4 +1,4 @@
-name: ChatGPT login
+name: ChatGPT bind phone
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       accounts:
-        description: '多个账号用英文分号 ; 分隔（也兼容换行）：email----password----2fa；第三段为 2FA 时忽略第四段及以后'
+        description: '多个账号用英文分号 ; 分隔（也兼容换行）：email----password----2fa'
         required: true
         type: string
       enable_711_proxy:
@@ -37,7 +37,7 @@ on:
         default: ''
         type: string
       hold_minutes:
-        description: '成功后保持分钟数（先回传 token，再等待关闭）'
+        description: '绑定成功后保持分钟数'
         required: false
         default: '15'
         type: choice
@@ -47,26 +47,20 @@ on:
           - '10'
           - '15'
           - '30'
-      payment_link_type:
-        description: '支付提链类型'
-        required: false
-        default: '未选择'
-        type: choice
-        options:
-          - 未选择
-          - gcash
-      payment_card:
-        description: '支付提链卡密（选 gcash 时填写）'
-        required: false
-        default: ''
+      hero_sms_api_key:
+        description: 'Hero SMS API Key'
+        required: true
         type: string
-      gc_ph_api_key:
-        description: 'GC 菲律宾图片 API Key（选填；有值时截屏后上传并轮询）'
-        required: false
-        default: ''
+      hero_sms_service:
+        description: 'Hero SMS 服务码'
+        required: true
+        type: string
+      hero_sms_country:
+        description: 'Hero SMS 国家 ID'
+        required: true
         type: string
       web_task_id:
-        description: '网页控制台任务 ID（有值时回传进度与 access token）'
+        description: '网页控制台任务 ID'
         required: false
         default: ''
         type: string
@@ -80,7 +74,7 @@ jobs:
       contents: read
       actions: write
     with:
-      mode: login
+      mode: bind_phone
       commit_message: ${{ inputs.commit_message }}
       accounts: ${{ inputs.accounts }}
       enable_711_proxy: ${{ inputs.enable_711_proxy }}
@@ -89,8 +83,11 @@ jobs:
       proxy_password: ${{ inputs.proxy_password }}
       proxy_links: ${{ inputs.proxy_links }}
       hold_minutes: ${{ inputs.hold_minutes }}
-      payment_link_type: ${{ inputs.payment_link_type }}
-      payment_card: ${{ inputs.payment_card }}
-      gc_ph_api_key: ${{ inputs.gc_ph_api_key }}
+      payment_link_type: '未选择'
+      payment_card: ''
+      gc_ph_api_key: ''
+      hero_sms_api_key: ${{ inputs.hero_sms_api_key }}
+      hero_sms_service: ${{ inputs.hero_sms_service }}
+      hero_sms_country: ${{ inputs.hero_sms_country }}
       web_task_id: ${{ inputs.web_task_id }}
     secrets: inherit

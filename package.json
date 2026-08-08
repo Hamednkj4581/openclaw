@@ -4,7 +4,7 @@
   "scripts": {
     "build": "esbuild src/app.ts --bundle --platform=node --format=cjs --outfile=dist/app.js",
     "build:login": "esbuild src/login.ts --bundle --platform=node --format=cjs --outfile=dist/login.js",
-    "test": "esbuild src/outlookMail.test.ts src/webMail.test.ts src/capsolver.test.ts src/app.test.ts src/login.test.ts src/cookieExport.test.ts src/proxy.test.ts src/networkCapture.test.ts --bundle --platform=node --format=cjs --outdir=dist/tests && node --test dist/tests/outlookMail.test.js dist/tests/webMail.test.js dist/tests/capsolver.test.js dist/tests/app.test.js dist/tests/login.test.js dist/tests/cookieExport.test.js dist/tests/proxy.test.js dist/tests/networkCapture.test.js",
+    "test": "esbuild src/outlookMail.test.ts src/webMail.test.ts src/capsolver.test.ts src/app.test.ts src/login.test.ts src/cookieExport.test.ts src/proxy.test.ts src/networkCapture.test.ts src/heroSms.test.ts --bundle --platform=node --format=cjs --outdir=dist/tests && node --test dist/tests/outlookMail.test.js dist/tests/webMail.test.js dist/tests/capsolver.test.js dist/tests/app.test.js dist/tests/login.test.js dist/tests/cookieExport.test.js dist/tests/proxy.test.js dist/tests/networkCapture.test.js dist/tests/heroSms.test.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

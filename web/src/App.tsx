@@ -16,7 +16,7 @@ import {
   message,
 } from 'antd';
 import { CopyOutlined, PlayCircleOutlined, StopOutlined } from '@ant-design/icons';
-import { cancelTask, fetchStatus, triggerTask, type ProgressLogEntry, type TaskMode, type TaskStatus } from './api';
+import { cancelTask, fetchHeroSmsMeta, fetchStatus, triggerTask, type HeroSmsCountry, type HeroSmsService, type ProgressLogEntry, type TaskMode, type TaskStatus } from './api';
 import './App.css';
 
 const { Title, Paragraph, Text } = Typography;
@@ -61,6 +61,9 @@ type PersistedSettings = {
   payment_link_type: string;
   payment_card: string;
   gc_ph_api_key: string;
+  hero_sms_api_key: string;
+  hero_sms_service: string;
+  hero_sms_country: string;
 };
 
 const DEFAULT_SETTINGS: PersistedSettings = {
@@ -71,6 +74,9 @@ const DEFAULT_SETTINGS: PersistedSettings = {
   payment_link_type: '未选择',
   payment_card: '',
   gc_ph_api_key: '',
+  hero_sms_api_key: '',
+  hero_sms_service: '',
+  hero_sms_country: '',
 };
 
 function emptyProxyStore(region = 'JP'): ProxyStore {
@@ -165,7 +171,10 @@ function readSettings(): PersistedSettings {
     if (!parsed || typeof parsed !== 'object') return { ...DEFAULT_SETTINGS };
     const hold = Number(parsed.hold_minutes);
     return {
-      mode: parsed.mode === 'login' || parsed.mode === 'register' ? parsed.mode : DEFAULT_SETTINGS.mode,
+      mode:
+        parsed.mode === 'login' || parsed.mode === 'register' || parsed.mode === 'bind_phone'
+          ? parsed.mode
+          : DEFAULT_SETTINGS.mode,
       forwarding_emails:
         typeof parsed.forwarding_emails === 'string' && parsed.forwarding_emails
           ? parsed.forwarding_emails
@@ -178,6 +187,9 @@ function readSettings(): PersistedSettings {
           : DEFAULT_SETTINGS.payment_link_type,
       payment_card: typeof parsed.payment_card === 'string' ? parsed.payment_card : '',
       gc_ph_api_key: typeof parsed.gc_ph_api_key === 'string' ? parsed.gc_ph_api_key : '',
+      hero_sms_api_key: typeof parsed.hero_sms_api_key === 'string' ? parsed.hero_sms_api_key : '',
+      hero_sms_service: typeof parsed.hero_sms_service === 'string' ? parsed.hero_sms_service : '',
+      hero_sms_country: typeof parsed.hero_sms_country === 'string' ? parsed.hero_sms_country : '',
     };
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -202,7 +214,7 @@ const PAYMENT_LINK_OPTIONS = [
   { value: 'gcash', label: 'gcash' },
 ];
 
-/** 注册/登录共用字段；模式专属字段按需使用 */
+/** 注册/登录/绑定手机共用字段 */
 interface TaskFormValues {
   accounts: string;
   forwarding_emails: string;
@@ -216,6 +228,9 @@ interface TaskFormValues {
   payment_link_type: string;
   payment_card: string;
   gc_ph_api_key: string;
+  hero_sms_api_key: string;
+  hero_sms_service: string;
+  hero_sms_country: string;
 }
 
 function isProxyEnabled(region: string | undefined): boolean {
@@ -236,6 +251,9 @@ function persistFormSettings(values: Partial<TaskFormValues>, mode: TaskMode): v
       : {}),
     ...(typeof values.payment_card === 'string' ? { payment_card: values.payment_card } : {}),
     ...(typeof values.gc_ph_api_key === 'string' ? { gc_ph_api_key: values.gc_ph_api_key } : {}),
+    ...(typeof values.hero_sms_api_key === 'string' ? { hero_sms_api_key: values.hero_sms_api_key } : {}),
+    ...(typeof values.hero_sms_service === 'string' ? { hero_sms_service: values.hero_sms_service } : {}),
+    ...(typeof values.hero_sms_country === 'string' ? { hero_sms_country: values.hero_sms_country } : {}),
   });
   if (isProxyEnabled(values.proxy_region)) {
     saveProxyRegionState(values.proxy_region!, {
@@ -354,6 +372,9 @@ export default function App() {
   const proxyRegion = Form.useWatch('proxy_region', form);
   const proxyType = Form.useWatch('proxy_type', form);
   const proxyRegionRef = useRef(proxyRegion);
+  const [heroSmsCountries, setHeroSmsCountries] = useState<HeroSmsCountry[]>([]);
+  const [heroSmsServices, setHeroSmsServices] = useState<HeroSmsService[]>([]);
+  const [heroSmsLoading, setHeroSmsLoading] = useState(false);
 
   useEffect(() => {
     proxyRegionRef.current = proxyRegion;
@@ -378,6 +399,9 @@ export default function App() {
       payment_link_type: settings.payment_link_type,
       payment_card: settings.payment_card,
       gc_ph_api_key: settings.gc_ph_api_key,
+      hero_sms_api_key: settings.hero_sms_api_key,
+      hero_sms_service: settings.hero_sms_service,
+      hero_sms_country: settings.hero_sms_country,
       proxy_region: resolvedRegion,
       proxy_type: resolvedType,
       proxy_username: resolvedRegion === 'none' ? '' : creds.username || '',
@@ -455,9 +479,6 @@ export default function App() {
         proxy_username: use711 ? (values.proxy_username || '').trim() : '',
         proxy_password: use711 ? values.proxy_password || '' : '',
         proxy_links: proxyEnabled && !use711 ? (values.proxy_links || '').trim() : '',
-        payment_link_type: values.payment_link_type,
-        payment_card: values.payment_card,
-        gc_ph_api_key: values.payment_link_type === 'gcash' ? values.gc_ph_api_key || '' : '',
         hold_minutes: [0, 5, 10, 15, 30].includes(Number(values.hold_minutes))
           ? Number(values.hold_minutes)
           : 15,
@@ -469,11 +490,25 @@ export default function App() {
               mode: 'register',
               forwarding_emails: values.forwarding_emails,
               enable_mfa: values.enable_mfa,
+              payment_link_type: values.payment_link_type,
+              payment_card: values.payment_card,
+              gc_ph_api_key: values.payment_link_type === 'gcash' ? values.gc_ph_api_key || '' : '',
             })
-          : await triggerTask({
-              ...shared,
-              mode: 'login',
-            });
+          : mode === 'bind_phone'
+            ? await triggerTask({
+                ...shared,
+                mode: 'bind_phone',
+                hero_sms_api_key: values.hero_sms_api_key || '',
+                hero_sms_service: values.hero_sms_service || '',
+                hero_sms_country: values.hero_sms_country || '',
+              })
+            : await triggerTask({
+                ...shared,
+                mode: 'login',
+                payment_link_type: values.payment_link_type,
+                payment_card: values.payment_card,
+                gc_ph_api_key: values.payment_link_type === 'gcash' ? values.gc_ph_api_key || '' : '',
+              });
       setTaskId(result.taskId);
       setRunName(result.runName || null);
       setStatus(null);
@@ -488,6 +523,27 @@ export default function App() {
   const copyText = async (text: string, okMessage = '已复制') => {
     await navigator.clipboard.writeText(text);
     message.success(okMessage);
+  };
+
+  const loadHeroSmsMeta = async () => {
+    const apiKey = (form.getFieldValue('hero_sms_api_key') || '').trim();
+    if (!apiKey) {
+      message.warning('请先填写 Hero SMS API Key');
+      return;
+    }
+    const countryRaw = form.getFieldValue('hero_sms_country');
+    const country = countryRaw === '' || countryRaw === undefined ? undefined : Number(countryRaw);
+    setHeroSmsLoading(true);
+    try {
+      const meta = await fetchHeroSmsMeta(apiKey, Number.isInteger(country) ? country : undefined);
+      setHeroSmsCountries(meta.countries);
+      setHeroSmsServices(meta.services);
+      message.success('已加载 Hero SMS 国家与服务列表');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '加载 Hero SMS 列表失败');
+    } finally {
+      setHeroSmsLoading(false);
+    }
   };
 
   const onCancelTask = () => {
@@ -562,6 +618,7 @@ export default function App() {
           options={[
             { label: '注册', value: 'register' },
             { label: '登录', value: 'login' },
+            { label: '绑定手机', value: 'bind_phone' },
           ]}
         />
 
@@ -582,6 +639,9 @@ export default function App() {
             payment_link_type: savedSettings.payment_link_type,
             payment_card: savedSettings.payment_card,
             gc_ph_api_key: savedSettings.gc_ph_api_key,
+            hero_sms_api_key: savedSettings.hero_sms_api_key,
+            hero_sms_service: savedSettings.hero_sms_service,
+            hero_sms_country: savedSettings.hero_sms_country,
           }}
           onValuesChange={(_, all) => {
             if (waiting) return;
@@ -596,7 +656,7 @@ export default function App() {
             extra={
               mode === 'register'
                 ? '支持单邮箱、Outlook 四字段、iCloud 两字段；多账号用换行或分号分隔'
-                : '格式：email----password----2fa；第三段识别为 2FA 后忽略第四段及以后（取件链接等）'
+                : '格式：email----password----2fa；多账号用换行或分号分隔'
             }
           >
             <TextArea
@@ -608,6 +668,75 @@ export default function App() {
               }
             />
           </Form.Item>
+
+          {mode === 'bind_phone' ? (
+            <>
+              <Form.Item
+                label="Hero SMS API Key"
+                name="hero_sms_api_key"
+                rules={[{ required: true, message: '请填写 Hero SMS API Key' }]}
+              >
+                <Input.Password placeholder="Hero SMS API Key" autoComplete="off" />
+              </Form.Item>
+              <Form.Item label="接码配置">
+                <Space wrap>
+                  <Button loading={heroSmsLoading} onClick={() => void loadHeroSmsMeta()}>
+                    加载国家与服务
+                  </Button>
+                  <Text type="secondary">先填 API Key，可选国家后再加载服务列表</Text>
+                </Space>
+              </Form.Item>
+              <Form.Item
+                label="国家"
+                name="hero_sms_country"
+                rules={[{ required: true, message: '请选择国家' }]}
+              >
+                <Select
+                  showSearch
+                  optionFilterProp="label"
+                  style={{ width: 320 }}
+                  placeholder="请先加载列表"
+                  options={heroSmsCountries.map((row) => ({
+                    value: String(row.id),
+                    label: `${row.name} (${row.id})`,
+                  }))}
+                  onChange={(value) => {
+                    form.setFieldValue('hero_sms_service', '');
+                    const apiKey = (form.getFieldValue('hero_sms_api_key') || '').trim();
+                    if (!apiKey || !value) return;
+                    void (async () => {
+                      setHeroSmsLoading(true);
+                      try {
+                        const meta = await fetchHeroSmsMeta(apiKey, Number(value));
+                        setHeroSmsCountries(meta.countries);
+                        setHeroSmsServices(meta.services);
+                      } catch (error) {
+                        message.error(error instanceof Error ? error.message : '刷新服务列表失败');
+                      } finally {
+                        setHeroSmsLoading(false);
+                      }
+                    })();
+                  }}
+                />
+              </Form.Item>
+              <Form.Item
+                label="服务"
+                name="hero_sms_service"
+                rules={[{ required: true, message: '请选择服务' }]}
+              >
+                <Select
+                  showSearch
+                  optionFilterProp="label"
+                  style={{ width: 320 }}
+                  placeholder="请先加载列表"
+                  options={heroSmsServices.map((row) => ({
+                    value: row.code,
+                    label: `${row.name} (${row.code})`,
+                  }))}
+                />
+              </Form.Item>
+            </>
+          ) : null}
 
           {mode === 'register' ? (
             <Form.Item
@@ -764,6 +893,8 @@ export default function App() {
             </>
           ) : null}
 
+          {mode !== 'bind_phone' ? (
+            <>
           <Form.Item label="支付提链" name="payment_link_type">
             <Select
               style={{ width: 200 }}
@@ -790,6 +921,8 @@ export default function App() {
               </Form.Item>
             </>
           ) : null}
+            </>
+          ) : null}
 
           <Space wrap className="submit-row">
             <Button
@@ -800,7 +933,13 @@ export default function App() {
               disabled={waiting || cancelling}
               size="large"
             >
-              {waiting ? '任务进行中…' : mode === 'register' ? '开始注册' : '开始登录'}
+              {waiting
+                ? '任务进行中…'
+                : mode === 'register'
+                  ? '开始注册'
+                  : mode === 'bind_phone'
+                    ? '开始绑定'
+                    : '开始登录'}
             </Button>
           </Space>
         </Form>
@@ -896,6 +1035,20 @@ export default function App() {
                         </Button>
                       </Space.Compact>
                     </div>
+                  ) : null}
+                  {account.phoneNumber ? (
+                    <div className="cred-box">
+                      <Text strong>手机号</Text>
+                      <Space.Compact className="token-box">
+                        <Input value={account.phoneNumber} readOnly />
+                        <Button icon={<CopyOutlined />} onClick={() => void copyText(account.phoneNumber!, '已复制手机号')}>
+                          复制
+                        </Button>
+                      </Space.Compact>
+                    </div>
+                  ) : null}
+                  {account.phoneBindError ? (
+                    <Paragraph className="account-payment-error">{account.phoneBindError}</Paragraph>
                   ) : null}
                   {account.accessToken ? (
                     <div className="cred-box">

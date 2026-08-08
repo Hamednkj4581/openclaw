@@ -68,3 +68,24 @@ export const MFA_ENABLED_SELECTORS = [
     "//button[@role='switch' and @aria-checked='true' and contains(translate(@aria-label, 'AUTHENTICATOR', 'authenticator'), 'authenticator')]",
     "//*[normalize-space(.)='Authenticator app']/ancestor::*[.//button[@role='switch']][1]//button[@role='switch' and @aria-checked='true']"
 ];
+
+/** ChatGPT 安全设置里短信/WhatsApp MFA 已开启 */
+export const MFA_SMS_ENABLED_SELECTORS = [
+    "//button[@data-testid='mfa-sms-toggle' and @role='switch' and @aria-checked='true']",
+    "//button[@role='switch' and @aria-checked='true' and contains(translate(@aria-label, 'TEXT MESSAGE', 'text message'), 'text message')]",
+    "//*[contains(translate(normalize-space(.), 'TEXT MESSAGE', 'text message'), 'text message') or contains(translate(normalize-space(.), 'WHATSAPP', 'whatsapp'), 'whatsapp')]/ancestor::*[.//button[@role='switch']][1]//button[@role='switch' and @aria-checked='true']"
+];
+
+/** 绑定手机号输入框 */
+export const PHONE_INPUT_SELECTORS = [
+    "//input[@type='tel' and not(@disabled)]",
+    "//input[contains(translate(@name, 'PHONE', 'phone'), 'phone') and not(@disabled)]",
+    "//input[contains(translate(@placeholder, 'PHONE', 'phone'), 'phone') and not(@disabled)]"
+];
+
+/** 发送短信验证码按钮 */
+export const PHONE_SEND_CODE_SELECTORS = [
+    "//button[contains(translate(normalize-space(.), 'SEND CODE', 'send code'), 'send code') and not(@disabled)]",
+    "//button[contains(translate(normalize-space(.), 'CONTINUE', 'continue'), 'continue') and not(@disabled)]",
+    "//button[@type='submit' and not(@disabled)]"
+];

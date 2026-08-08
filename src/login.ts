@@ -22,7 +22,16 @@ import {
     SIGNUP_SELECTORS,
 } from './selectors.js';
 import { parseLoginAccount } from './loginAccount.js';
-import { finishAccountSuccess, notifyWebAccountFailure, notifyWebProgress } from './hold.js';
+import { cookieFileNameForEmail, writeCookieEditorJson } from './cookieExport.js';
+import {
+    finishAccountSuccess,
+    notifyWebAccountFailure,
+    notifyWebProgress,
+    notifyWebAccountSuccess,
+    resolveHoldMinutes,
+    waitHoldMinutes,
+} from './hold.js';
+import { bindPhoneWithRetry, isBindPhoneMode } from './phoneBind.js';
 
 const MAX_TIMEOUT = Math.pow(2, 31) - 1;
 const EVIDENCE_TIMEOUT_MS = 15_000;
@@ -324,6 +333,14 @@ async function extractAccessToken(page: Page): Promise<string> {
     });
 }
 
+function writeAccountCookies(email: string, cookies: Awaited<ReturnType<Page['cookies']>>): void {
+    const dir = process.env.ACCOUNT_COOKIE_DIR || '.';
+    fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, cookieFileNameForEmail(email));
+    const count = writeCookieEditorJson(filePath, cookies);
+    logger.info('已导出 Cookie-Editor JSON：%s（%s 条）', filePath, count);
+}
+
 (async () => {
     let chrome: Browser | undefined;
     let exiting = false;
@@ -479,6 +496,29 @@ async function extractAccessToken(page: Page): Promise<string> {
             );
 
         logger.info('已打印 access token（Base64）');
+        writeAccountCookies(account.email, await page.cookies());
+
+        if (isBindPhoneMode()) {
+            const bind = await bindPhoneWithRetry(
+                page,
+                (message) => notifyWebProgress(message, account.email),
+                evidence,
+            );
+            const holdMinutes = resolveHoldMinutes();
+            const holdUntil = holdMinutes > 0 ? Date.now() + holdMinutes * 60 * 1000 : 0;
+            await notifyWebAccountSuccess(account.email, accessToken, {
+                otpSecret: account.otpSecret,
+                ...(bind.phoneNumber ? { phoneNumber: bind.phoneNumber } : {}),
+                ...(bind.error ? { phoneBindError: bind.error } : {}),
+                ...(holdUntil > 0 ? { holdUntil } : {}),
+            });
+            if (holdMinutes > 0) {
+                await notifyWebProgress(`将保持约 ${holdMinutes} 分钟后关闭…`, account.email);
+                await waitHoldMinutes(holdMinutes, holdUntil);
+            }
+            return;
+        }
+
         await finishAccountSuccess(account.email, accessToken, chrome, proxy);
     } catch (error) {
         await fail(error);

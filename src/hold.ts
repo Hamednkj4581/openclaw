@@ -59,7 +59,6 @@ export async function notifyWebAccountFailure(email: string | undefined, error: 
     }
     const config = webCallbackConfig();
     if (!config) return;
-    // 失败只推 account_done，不再追加 progress，避免与其它账号并行回调抢写
     await postWebCallback({
         event: 'account_done',
         account: {
@@ -87,7 +86,7 @@ export async function notifyWebProgress(message: string, email?: string): Promis
     });
 }
 
-/** 成功后回传 access token（可附带注册密码/2FA、支付链接/二维码图/提链失败原因；holdUntil 可选） */
+/** 成功后回传 access token（可附带注册密码/2FA、支付链接/二维码图/手机号等；holdUntil 可选） */
 export async function notifyWebAccountSuccess(
     email: string,
     accessToken: string,
@@ -98,6 +97,8 @@ export async function notifyWebAccountSuccess(
         paymentLink?: string;
         paymentQr?: string;
         paymentError?: string;
+        phoneNumber?: string;
+        phoneBindError?: string;
     }
 ): Promise<void> {
     const config = webCallbackConfig();
@@ -108,6 +109,8 @@ export async function notifyWebAccountSuccess(
     const paymentLink = options?.paymentLink?.trim();
     const paymentQr = options?.paymentQr?.trim();
     const paymentError = options?.paymentError?.trim().slice(0, WEB_PROGRESS_MAX);
+    const phoneNumber = options?.phoneNumber?.trim();
+    const phoneBindError = options?.phoneBindError?.trim().slice(0, WEB_PROGRESS_MAX);
     if (process.env.GITHUB_ACTIONS === 'true') {
         if (password) console.log(`::add-mask::${password}`);
         if (otpSecret) console.log(`::add-mask::${otpSecret}`);
@@ -126,6 +129,8 @@ export async function notifyWebAccountSuccess(
             ...(paymentLink ? { paymentLink } : {}),
             ...(paymentQr ? { paymentQr } : {}),
             ...(paymentError ? { paymentError } : {}),
+            ...(phoneNumber ? { phoneNumber } : {}),
+            ...(phoneBindError ? { phoneBindError } : {}),
         },
     });
 }
@@ -169,7 +174,6 @@ export async function finishAccountSuccess(
 ): Promise<void> {
     const password = credentials?.password?.trim();
     const otpSecret = credentials?.otpSecret?.trim();
-    // 先回传 token/凭据，此时尚未进入保持倒计时
     await notifyWebAccountSuccess(email, accessToken, {
         ...(password ? { password } : {}),
         ...(otpSecret ? { otpSecret } : {}),
@@ -202,7 +206,6 @@ export async function finishAccountSuccess(
             logger.warn('提链成功但无浏览器实例，跳过二维码提取');
             await notifyWebProgress(paymentError, email).catch(() => undefined);
         }
-        // 先回传链接/二维码图，再走菲律宾通道（轮询可能较长，避免网页迟迟看不到码）
         await notifyWebPaymentLink(email, paymentLink, paymentQr, paymentQr ? undefined : paymentError);
         if (paymentQr && isGcPhEnabled()) {
             await submitPaymentQrToGcPh(paymentQr, (message) => notifyWebProgress(message, email));
@@ -216,7 +219,6 @@ export async function finishAccountSuccess(
         logger.info('提链阶段未启用或未得到支付链接，跳过二维码提取');
     }
 
-    // 提链完成后再开始「等待关闭」；paymentError 单独落库，不被保持提示覆盖
     const holdMinutes = resolveHoldMinutes();
     const holdUntil = holdMinutes > 0 ? Date.now() + holdMinutes * 60 * 1000 : 0;
     logger.info('提链阶段结束，即将开始保持等待 %s 分钟', holdMinutes);

@@ -1,4 +1,4 @@
-export type TaskMode = 'register' | 'login';
+export type TaskMode = 'register' | 'login' | 'bind_phone';
 export type TaskPhase = 'submitted' | 'processing' | 'done' | 'failed' | 'cancelled';
 
 /** 账号进度时间线条目 */
@@ -31,6 +31,10 @@ export interface AccountResult {
   paymentQrUrl?: string;
   /** 登录保持结束时间（epoch ms），有值时前端显示倒计时 */
   holdUntil?: number;
+  /** 绑定的手机号 */
+  phoneNumber?: string;
+  /** 手机号绑定失败原因 */
+  phoneBindError?: string;
   /** 按时间排列的进度详情（点击展开） */
   logs?: ProgressLogEntry[];
 }

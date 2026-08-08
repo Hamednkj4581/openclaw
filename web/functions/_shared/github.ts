@@ -3,7 +3,9 @@ import type { Env, TaskMode } from './types';
 const API_VERSION = '2022-11-28';
 
 function workflowFile(mode: TaskMode): string {
-  return mode === 'register' ? 'ci.yml' : 'login.yml';
+  if (mode === 'register') return 'ci.yml';
+  if (mode === 'bind_phone') return 'bind-phone.yml';
+  return 'login.yml';
 }
 
 function githubHeaders(env: Env): HeadersInit {
@@ -37,7 +39,6 @@ export async function dispatchWorkflow(
   });
 
   if (response.status !== 204) {
-    // 不把 GitHub 原始响应透传给浏览器
     throw new Error('trigger_failed');
   }
 }
@@ -50,7 +51,6 @@ type WorkflowRun = {
   conclusion?: string | null;
 };
 
-/** 按 run-name（commit_message）查找最近的 Actions 运行 */
 export async function findWorkflowRunByName(
   env: Env,
   mode: TaskMode,
@@ -71,7 +71,6 @@ export async function findWorkflowRunByName(
   );
 }
 
-/** 取消进行中的 Actions 运行；已结束则视为成功 */
 export async function cancelWorkflowRun(env: Env, runId: number): Promise<void> {
   const url =
     `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}` +
@@ -80,13 +79,11 @@ export async function cancelWorkflowRun(env: Env, runId: number): Promise<void> 
     method: 'POST',
     headers: githubHeaders(env),
   });
-  // 202 已受理；409 常见于已结束
   if (response.status === 202 || response.status === 409) return;
   if (!response.ok) throw new Error('cancel_failed');
 }
 
 export function commitMessage(mode: TaskMode): string {
-  // Cloudflare Workers 默认 UTC；任务名统一按上海时区
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Shanghai',
     year: 'numeric',
@@ -99,5 +96,7 @@ export function commitMessage(mode: TaskMode): string {
   }).formatToParts(new Date());
   const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? '';
   const stamp = `${get('year')}${get('month')}${get('day')}-${get('hour')}${get('minute')}${get('second')}`;
-  return mode === 'register' ? `web-register-${stamp}` : `web-login-${stamp}`;
+  if (mode === 'register') return `web-register-${stamp}`;
+  if (mode === 'bind_phone') return `web-bind-phone-${stamp}`;
+  return `web-login-${stamp}`;
 }

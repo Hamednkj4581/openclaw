@@ -1,4 +1,4 @@
-export type TaskMode = 'register' | 'login';
+export type TaskMode = 'register' | 'login' | 'bind_phone';
 
 export interface TriggerPayload {
   mode: TaskMode;
@@ -13,6 +13,9 @@ export interface TriggerPayload {
   payment_link_type?: string;
   payment_card?: string;
   gc_ph_api_key?: string;
+  hero_sms_api_key?: string;
+  hero_sms_service?: string;
+  hero_sms_country?: string;
   hold_minutes?: number;
 }
 
@@ -34,6 +37,8 @@ export interface AccountStatus {
   paymentLink?: string;
   paymentQr?: string;
   holdUntil?: number;
+  phoneNumber?: string;
+  phoneBindError?: string;
   logs?: ProgressLogEntry[];
 }
 
@@ -80,6 +85,31 @@ export async function cancelTask(taskId: string): Promise<{ message: string; pha
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ taskId }),
+  });
+  return readJson(response);
+}
+
+export interface HeroSmsCountry {
+  id: number;
+  name: string;
+}
+
+export interface HeroSmsService {
+  code: string;
+  name: string;
+}
+
+export async function fetchHeroSmsMeta(
+  apiKey: string,
+  country?: number,
+): Promise<{ countries: HeroSmsCountry[]; services: HeroSmsService[] }> {
+  const response = await fetch('/api/hero-sms-meta', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      api_key: apiKey,
+      ...(typeof country === 'number' ? { country } : {}),
+    }),
   });
   return readJson(response);
 }

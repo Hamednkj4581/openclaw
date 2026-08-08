@@ -23,6 +23,8 @@ interface WebhookBody {
     paymentLink?: string;
     paymentQr?: string;
     paymentError?: string;
+    phoneNumber?: string;
+    phoneBindError?: string;
     error?: string;
     holdUntil?: number;
   };
@@ -194,6 +196,19 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         } else delete row.paymentError;
       } else if (paymentLink && (paymentQr || row.paymentQr)) {
         delete row.paymentError;
+      }
+      const phoneNumber = (body.account?.phoneNumber || '').trim();
+      if (phoneNumber) {
+        row.phoneNumber = phoneNumber;
+        appendProgressLog(row, '手机号已绑定');
+      }
+      const phoneBindErrorRaw = body.account?.phoneBindError;
+      if (typeof phoneBindErrorRaw === 'string') {
+        const phoneBindError = phoneBindErrorRaw.trim().slice(0, 160);
+        if (phoneBindError) {
+          row.phoneBindError = phoneBindError;
+          appendProgressLog(row, phoneBindError);
+        } else delete row.phoneBindError;
       }
       const holdUntil = Number(body.account?.holdUntil);
       if (Number.isFinite(holdUntil) && holdUntil > 0) {

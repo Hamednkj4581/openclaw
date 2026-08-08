@@ -915,7 +915,7 @@ export default function App() {
                         <>
                           <Text strong>支付二维码</Text>
                           <div className="payment-qr">
-                            <img src={account.paymentQr} alt="支付二维码" width={168} height={168} />
+                            <img src={account.paymentQr} alt="支付二维码" />
                           </div>
                         </>
                       ) : (

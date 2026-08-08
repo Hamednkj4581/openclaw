@@ -25,7 +25,7 @@ export interface AccountResult {
   paymentError?: string;
   /** 单账号支付链接（URL） */
   paymentLink?: string;
-  /** 提链页内真实二维码图片（data:image/...;base64,...） */
+  /** 提链页区域截屏（提示文案 + 二维码，data:image/...;base64,...） */
   paymentQr?: string;
   /** @deprecated 已改为只回传图片，读取时清理旧字段 */
   paymentQrUrl?: string;

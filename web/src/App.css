@@ -177,8 +177,8 @@
 }
 
 .payment-qr img {
-  width: 168px;
-  height: 168px;
+  width: min(280px, 100%);
+  height: auto;
   object-fit: contain;
   background: #fff;
   border: 1px solid #e5e7eb;

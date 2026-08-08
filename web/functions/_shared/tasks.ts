@@ -20,6 +20,7 @@ export function publicStatus(state: TaskState) {
     ok: true,
     phase: state.phase,
     message: state.message,
+    runName: state.runName || undefined,
     total: state.total,
     doneCount,
     logs: state.logs || [],

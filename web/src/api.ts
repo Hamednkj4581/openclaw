@@ -38,6 +38,8 @@ export interface TaskStatus {
   ok: boolean;
   phase: 'submitted' | 'processing' | 'done' | 'failed';
   message: string;
+  /** 与 GitHub Actions run-name 一致 */
+  runName?: string;
   total: number;
   doneCount: number;
   logs?: ProgressLogEntry[];
@@ -54,7 +56,9 @@ async function readJson<T>(response: Response): Promise<T> {
   return data;
 }
 
-export async function triggerTask(payload: TriggerPayload): Promise<{ taskId: string; message: string }> {
+export async function triggerTask(
+  payload: TriggerPayload,
+): Promise<{ taskId: string; runName: string; message: string }> {
   const response = await fetch('/api/trigger', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

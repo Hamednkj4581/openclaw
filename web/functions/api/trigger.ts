@@ -72,12 +72,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 
   const taskId = crypto.randomUUID();
+  const runName = commitMessage(mode);
   const state: TaskState = {
     mode,
     phase: 'submitted',
     message: '已提交，正在启动任务，请稍候…',
     total: 0,
     accounts: [],
+    runName,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
@@ -87,7 +89,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const holdMinutes = [0, 5, 10, 15, 30].includes(hold) ? String(hold) : '15';
 
   const inputs: Record<string, string> = {
-    commit_message: commitMessage(mode),
+    commit_message: runName,
     accounts,
     web_task_id: taskId,
     enable_711_proxy: String(enableProxy),
@@ -112,5 +114,5 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return friendlyError(502, '提交失败，请稍后重试');
   }
 
-  return json({ ok: true, taskId, message: state.message });
+  return json({ ok: true, taskId, runName, message: state.message });
 };

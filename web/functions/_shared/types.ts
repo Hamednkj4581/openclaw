@@ -41,6 +41,8 @@ export interface TaskState {
   message: string;
   total: number;
   accounts: AccountResult[];
+  /** 与 GitHub Actions run-name 一致（如 web-login-20260808-145540） */
+  runName?: string;
   /** @deprecated 提链已改为账号级 paymentLink */
   paymentLinks?: string[];
   paymentMessage?: string;

@@ -188,6 +188,7 @@ export default function App() {
   const [mode, setMode] = useState<TaskMode>('register');
   const [submitting, setSubmitting] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [runName, setRunName] = useState<string | null>(null);
   const [status, setStatus] = useState<TaskStatus | null>(null);
   const [form] = Form.useForm<TaskFormValues>();
   const paymentLinkType = Form.useWatch('payment_link_type', form);
@@ -221,6 +222,7 @@ export default function App() {
         const next = await fetchStatus(taskId);
         if (cancelled) return;
         setStatus(next);
+        if (next.runName) setRunName(next.runName);
         if (!next.done) {
           timer = window.setTimeout(tick, 2500);
         }
@@ -297,6 +299,7 @@ export default function App() {
               mode: 'login',
             });
       setTaskId(result.taskId);
+      setRunName(result.runName || null);
       setStatus(null);
       message.success('已提交');
     } catch (error) {
@@ -484,6 +487,22 @@ export default function App() {
 
       {taskId && (
         <Card className="panel status-panel" bordered={false} title="处理进度">
+          <div className="task-id-box">
+            <Text strong>任务 ID</Text>
+            <Text type="secondary" className="task-id-hint">
+              与 Actions 运行名称一致，便于排查
+            </Text>
+            <Space.Compact className="token-box">
+              <Input value={runName || status?.runName || '生成中…'} readOnly />
+              <Button
+                icon={<CopyOutlined />}
+                disabled={!runName && !status?.runName}
+                onClick={() => void copyText(runName || status?.runName || '', '已复制任务 ID')}
+              >
+                复制
+              </Button>
+            </Space.Compact>
+          </div>
           <Paragraph className="status-message">{status?.message || '已提交，正在启动任务，请稍候…'}</Paragraph>
           {waitingTip ? <Paragraph className="status-tip">{waitingTip}</Paragraph> : null}
           <Progress

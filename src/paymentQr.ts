@@ -13,7 +13,8 @@ export type PaymentQrCapture = {
 
 /**
  * 用当前浏览器新开标签打开提链页，读取 #qrcode img 的 data URL 图片。
- * 失败只告警并返回 undefined（不影响主流程）。
+ * 取码成功后故意不关支付页，避免服务端判定会话失效导致扫码无效；
+ * 页面随延迟关闭结束时浏览器一起退出。失败只告警并返回 undefined。
  */
 export async function capturePaymentQr(
     browser: Browser,
@@ -24,6 +25,8 @@ export async function capturePaymentQr(
     if (!link) return undefined;
 
     const page = await browser.newPage();
+    /** 取码成功则保持标签打开，供扫码期间会话继续有效 */
+    let keepOpen = false;
     try {
         await page.setViewport({ width: 420, height: 900 });
         if (proxyAuth && (proxyAuth.username || proxyAuth.password)) {
@@ -51,14 +54,17 @@ export async function capturePaymentQr(
         if (dataUrl.length > MAX_DATA_URL_CHARS) {
             throw new Error('二维码图片过大，已跳过回传');
         }
-        logger.info('已从提链页提取二维码图片（%s 字符）', dataUrl.length);
+        logger.info('已从提链页提取二维码图片（%s 字符），保持支付页打开直至延迟关闭', dataUrl.length);
+        keepOpen = true;
         return { dataUrl };
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         logger.warn('提取支付二维码失败（不影响主流程）：%s', message);
         return undefined;
     } finally {
-        await page.close().catch(() => undefined);
+        if (!keepOpen) {
+            await page.close().catch(() => undefined);
+        }
     }
 }
 

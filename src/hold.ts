@@ -154,7 +154,7 @@ export async function notifyWebPaymentLink(
 
 /**
  * 顺序：回传 token（及可选注册密码/2FA）→ 提链 → 打开提链页提取二维码 → 再开始保持等待关闭。
- * 提链/取码不得占用保持时长。
+ * 提链/取码不得占用保持时长；取码成功后支付页保持打开，等保持时长到再随浏览器退出。
  */
 export async function finishAccountSuccess(
     email: string,

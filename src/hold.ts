@@ -59,6 +59,7 @@ export async function notifyWebAccountFailure(email: string | undefined, error: 
     }
     const config = webCallbackConfig();
     if (!config) return;
+    // 失败只推 account_done，不再追加 progress，避免与其它账号并行回调抢写
     await postWebCallback({
         event: 'account_done',
         account: {
@@ -68,7 +69,6 @@ export async function notifyWebAccountFailure(email: string | undefined, error: 
             error: tip,
         },
     });
-    await notifyWebProgress(tip, email).catch(() => undefined);
 }
 
 /** 向网页回传进度（失败不影响主流程） */

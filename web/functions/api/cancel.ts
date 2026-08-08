@@ -1,7 +1,7 @@
 import type { Env } from '../_shared/types';
 import { appendProgressLog, friendlyError, json } from '../_shared/types';
 import { cancelWorkflowRun, findWorkflowRunByName } from '../_shared/github';
-import { readTask, writeTask } from '../_shared/tasks';
+import { readTask, writeAccount, writeTaskMeta } from '../_shared/tasks';
 
 function requireEnv(env: Env): string | null {
   if (!env.GITHUB_PAT) return '服务未配置';
@@ -59,15 +59,16 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   state.phase = 'cancelled';
   state.message = '任务已取消';
   appendProgressLog(state, '任务已取消');
-  for (const account of state.accounts) {
-    if (account.ok === null) {
-      account.ok = false;
-      account.error = '任务已取消';
-      delete account.hint;
-      appendProgressLog(account, '任务已取消');
-    }
+  const pending = state.accounts.filter((account) => account.ok === null);
+  for (const account of pending) {
+    account.ok = false;
+    account.error = '任务已取消';
+    delete account.hint;
+    appendProgressLog(account, '任务已取消');
   }
-  await writeTask(context.env, taskId, state);
+  // 账号键与任务元数据分开写，避免只更新总表而丢各账号进度
+  await Promise.all(pending.map((account) => writeAccount(context.env, taskId, account)));
+  await writeTaskMeta(context.env, taskId, state);
 
   return json({
     ok: true,

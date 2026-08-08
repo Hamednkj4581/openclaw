@@ -275,7 +275,8 @@ jobs:
           fi
 
       - name: 通知网页控制台账号失败
-        if: ${{ failure() && inputs.web_task_id != '' }}
+        # cancelled 不是 failure：并发取消/手动取消也必须回传，否则网页会一直「处理中」
+        if: ${{ (failure() || cancelled()) && inputs.web_task_id != '' }}
         continue-on-error: true
         env:
           WEB_TASK_ID: ${{ inputs.web_task_id }}
@@ -283,7 +284,7 @@ jobs:
           WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
           WEB_EVENT: account_done
           WEB_ACCOUNT_INDEX: ${{ matrix.account_index }}
-          WEB_ACCOUNT_EMAIL: ${{ env.ACCOUNT_EMAIL }}
+          WEB_ACCOUNT_EMAIL: ${{ env.ACCOUNT_EMAIL || matrix.email }}
           WEB_ACCOUNT_OK: 'false'
           WEB_ACCOUNT_ERROR_DEFAULT: ${{ inputs.mode == 'login' && '登录失败' || '注册失败' }}
         run: |
@@ -291,7 +292,11 @@ jobs:
             WEB_ACCOUNT_ERROR="$(python -c "from pathlib import Path; t=Path('web-account-error.txt').read_text(encoding='utf-8').strip().splitlines(); print((t[0] if t else '')[:240])")"
           fi
           if [ -z "${WEB_ACCOUNT_ERROR}" ]; then
-            WEB_ACCOUNT_ERROR="${WEB_ACCOUNT_ERROR_DEFAULT}"
+            if [ "${{ job.status }}" = "cancelled" ]; then
+              WEB_ACCOUNT_ERROR="任务已取消"
+            else
+              WEB_ACCOUNT_ERROR="${WEB_ACCOUNT_ERROR_DEFAULT}"
+            fi
           fi
           export WEB_ACCOUNT_ERROR
           python .github/scripts/web_callback.py

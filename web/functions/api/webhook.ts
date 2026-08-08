@@ -113,8 +113,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       delete row.paymentError;
       delete row.holdUntil;
       delete row.hint;
-      row.error = (body.account?.error || '处理失败').slice(0, 160);
-      appendProgressLog(row, row.error);
+      const incoming = (body.account?.error || '处理失败').trim().slice(0, 240) || '处理失败';
+      const generic = new Set(['注册失败', '登录失败', '处理失败', '未拿到结果']);
+      // Node 已回传具体原因时，不要被工作流兜底的笼统文案覆盖
+      if (row.error && generic.has(incoming) && !generic.has(row.error)) {
+        appendProgressLog(row, row.error);
+      } else {
+        row.error = incoming;
+        appendProgressLog(row, row.error);
+      }
     } else {
       delete row.error;
       if (body.account?.accessToken) {

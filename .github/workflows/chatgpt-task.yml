@@ -259,8 +259,16 @@ jobs:
           WEB_ACCOUNT_INDEX: ${{ matrix.account_index }}
           WEB_ACCOUNT_EMAIL: ${{ env.ACCOUNT_EMAIL }}
           WEB_ACCOUNT_OK: 'false'
-          WEB_ACCOUNT_ERROR: ${{ inputs.mode == 'login' && '登录失败' || '注册失败' }}
-        run: python .github/scripts/web_callback.py
+          WEB_ACCOUNT_ERROR_DEFAULT: ${{ inputs.mode == 'login' && '登录失败' || '注册失败' }}
+        run: |
+          if [ -f web-account-error.txt ]; then
+            WEB_ACCOUNT_ERROR="$(python -c "from pathlib import Path; t=Path('web-account-error.txt').read_text(encoding='utf-8').strip().splitlines(); print((t[0] if t else '')[:240])")"
+          fi
+          if [ -z "${WEB_ACCOUNT_ERROR}" ]; then
+            WEB_ACCOUNT_ERROR="${WEB_ACCOUNT_ERROR_DEFAULT}"
+          fi
+          export WEB_ACCOUNT_ERROR
+          python .github/scripts/web_callback.py
 
       - name: 上传账号结果
         if: always()
@@ -274,6 +282,7 @@ jobs:
             access-token.txt
             access-token.b64.txt
             payment-link.txt
+            web-account-error.txt
           if-no-files-found: ignore
           retention-days: 7
 

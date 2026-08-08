@@ -22,7 +22,7 @@ import {
     SIGNUP_SELECTORS,
 } from './selectors.js';
 import { parseLoginAccount } from './loginAccount.js';
-import { finishAccountSuccess, notifyWebProgress } from './hold.js';
+import { finishAccountSuccess, notifyWebAccountFailure, notifyWebProgress } from './hold.js';
 
 const MAX_TIMEOUT = Math.pow(2, 31) - 1;
 const EVIDENCE_TIMEOUT_MS = 15_000;
@@ -336,11 +336,14 @@ async function extractAccessToken(page: Page): Promise<string> {
         return out;
     };
     const evidence = (page: Page, stage: string) => captureEvidence(page, ++evidenceStep, stage);
+    let accountEmail = '';
     const fail = async (error: unknown) => {
         if (exiting) return;
         exiting = true;
         const message = error instanceof Error ? error.stack ?? error.message : String(error);
+        const tip = error instanceof Error ? error.message : String(error);
         githubAnnotation('error', message);
+        await notifyWebAccountFailure(accountEmail || undefined, tip).catch(() => undefined);
         networkCapture?.flush();
         if (chrome) await captureErrorEvidence(chrome);
         await chrome?.close().catch(() => undefined);
@@ -351,6 +354,7 @@ async function extractAccessToken(page: Page): Promise<string> {
 
     try {
         const account = parseLoginAccount(process.env.CHATGPT_LOGIN ?? '');
+        accountEmail = account.email;
         sensitiveValues.add(account.email);
         sensitiveValues.add(account.password);
         sensitiveValues.add(account.otpSecret);

@@ -104,7 +104,7 @@ if __name__ == "__main__":
                 account["ok"] = False
                 account["error"] = "未拿到结果"
         else:
-            account["error"] = (os.environ.get("WEB_ACCOUNT_ERROR") or "处理失败")[:80]
+            account["error"] = (os.environ.get("WEB_ACCOUNT_ERROR") or "处理失败")[:240]
         payload["account"] = account
     elif event == "finished":
         payload["ok"] = (os.environ.get("WEB_FINISHED_OK") or "true").lower() in ("1", "true", "yes")

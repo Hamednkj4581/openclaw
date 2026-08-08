@@ -15,7 +15,7 @@ import { installNetworkCapture } from './networkCapture.js';
 import { buildStickyProxyFromEnv, buildProxyPacUrl, is711ProxyEnabled, preflightProxy, rotateStickySession } from './proxy.js';
 import { AUTHENTICATED_SELECTORS, CONTINUE_SELECTORS, LOGIN_SELECTORS, MFA_CHALLENGE_SELECTORS, MFA_CODE_SELECTORS, MFA_ENABLED_SELECTORS, MFA_VERIFY_SELECTORS, SIGNUP_EMAIL_SELECTORS, SIGNUP_SELECTORS } from './selectors.js';
 import { cookieFileNameForEmail, writeCookieEditorJson } from './cookieExport.js';
-import { finishAccountSuccess, notifyWebProgress } from './hold.js';
+import { finishAccountSuccess, notifyWebAccountFailure, notifyWebProgress } from './hold.js';
 
 const MAX_TIMEOUT = Math.pow(2, 31) - 1;
 const EVIDENCE_TIMEOUT_MS = 15_000;
@@ -596,11 +596,14 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
         return out;
     };
     const evidence = (page: Page, stage: string) => captureEvidence(page, ++evidenceStep, stage);
+    let accountEmail = '';
     const fail = async (error: unknown) => {
         if (exiting) return;
         exiting = true;
         const message = error instanceof Error ? error.stack ?? error.message : String(error);
+        const tip = error instanceof Error ? error.message : String(error);
         githubAnnotation('error', message);
+        await notifyWebAccountFailure(accountEmail || undefined, tip).catch(() => undefined);
         networkCapture?.flush();
         if (chrome) await captureErrorEvidence(chrome);
         await chrome?.close().catch(() => undefined);
@@ -612,6 +615,7 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
     try {
         const credentials = credentialsFromEnv();
         const email = credentials.email;
+        accountEmail = email;
         Object.values(credentials).forEach(value => typeof value === 'string' && sensitiveValues.add(value));
         await notifyWebProgress('正在准备，请稍候…', email);
         await validateCapSolver();

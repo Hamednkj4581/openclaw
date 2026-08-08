@@ -1,10 +1,15 @@
 import type { Browser } from 'puppeteer';
+import fs from 'fs';
 import Utility from './Utility.js';
 import logger from './logger.js';
 import { extractAccountPaymentLink } from './paymentLink.js';
 import { capturePaymentQr, type ProxyAuth } from './paymentQr.js';
 
 const ALLOWED_HOLD_MINUTES = new Set([0, 5, 10, 15, 30]);
+/** 进度文案上限（需容纳提链失败原因） */
+const WEB_PROGRESS_MAX = 160;
+/** 失败原因上限（需容纳 2FA/已注册等完整说明） */
+const WEB_ERROR_MAX = 240;
 
 /** 读取延迟关闭分钟数；兼容 HOLD_MINUTES / LOGIN_HOLD_MINUTES */
 export function resolveHoldMinutes(): number {
@@ -43,8 +48,27 @@ async function postWebCallback(payload: Record<string, unknown>): Promise<void> 
     }
 }
 
-/** 进度文案上限（需容纳提链失败原因） */
-const WEB_PROGRESS_MAX = 160;
+/** 账号失败回传具体原因（失败不影响主流程收尾） */
+export async function notifyWebAccountFailure(email: string | undefined, error: string): Promise<void> {
+    const tip = error.trim().split(/\r?\n/)[0]?.trim().slice(0, WEB_ERROR_MAX) || '处理失败';
+    try {
+        fs.writeFileSync('web-account-error.txt', tip, 'utf8');
+    } catch {
+        // 写文件失败不影响回调
+    }
+    const config = webCallbackConfig();
+    if (!config) return;
+    await postWebCallback({
+        event: 'account_done',
+        account: {
+            index: config.index,
+            ...(email ? { email } : {}),
+            ok: false,
+            error: tip,
+        },
+    });
+    await notifyWebProgress(tip, email).catch(() => undefined);
+}
 
 /** 向网页回传进度（失败不影响主流程） */
 export async function notifyWebProgress(message: string, email?: string): Promise<void> {

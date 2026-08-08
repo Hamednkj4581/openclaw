@@ -628,6 +628,7 @@ async function enableMfa(page: Page, evidence: (page: Page, stage: string) => Pr
         const registrationStartedAt = new Date(Date.now() - 30_000);
         const enableChatGptMfa = ['1', 'true'].includes((process.env.ENABLE_CHATGPT_MFA ?? 'true').toLowerCase());
         const chatGptPassword = generatePassword();
+        sensitiveValues.add(chatGptPassword);
         let page!: Page;
         for (let attempt = 1; attempt <= MAX_OPEN_CHATGPT_ATTEMPTS; attempt++) {
             if (proxy) {
